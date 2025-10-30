@@ -22,7 +22,7 @@ import {
   likedSections,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, isNull, sql } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User methods
@@ -146,7 +146,14 @@ export class DBStorage implements IStorage {
   }
 
   async createSection(section: InsertSection): Promise<Section> {
-    const result = await db.insert(sections).values(section).returning();
+    const now = section.publishedAt ?? new Date();
+    const values: typeof sections.$inferInsert = {
+      ...section,
+      publishedAt: now,
+      publishedDateManual: section.publishedDateManual ?? false,
+    };
+
+    const result = await db.insert(sections).values(values).returning();
     return result[0];
   }
 
@@ -556,8 +563,38 @@ export class DBStorage implements IStorage {
     const result = await db.select({ count: sql<number>`count(*)` })
       .from(likedSections)
       .where(eq(likedSections.sectionId, sectionId));
-    
+
     return Number(result[0]?.count || 0);
+  }
+
+  private async refreshSectionPublishedAt(sectionId: string): Promise<void> {
+    const sectionRecord = await db
+      .select({
+        id: sections.id,
+        publishedDateManual: sections.publishedDateManual,
+      })
+      .from(sections)
+      .where(eq(sections.id, sectionId))
+      .limit(1);
+
+    const section = sectionRecord[0];
+
+    if (!section || section.publishedDateManual) {
+      return;
+    }
+
+    const latestPage = await db
+      .select({ updatedAt: pages.updatedAt })
+      .from(pages)
+      .where(eq(pages.sectionId, sectionId))
+      .orderBy(desc(pages.updatedAt))
+      .limit(1);
+
+    if (latestPage.length === 0) {
+      return;
+    }
+
+    await db.update(sections).set({ publishedAt: latestPage[0].updatedAt }).where(eq(sections.id, sectionId));
   }
 }
 

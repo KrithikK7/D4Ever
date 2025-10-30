@@ -65,10 +65,12 @@ export const pages = pgTable("pages", {
   sectionId: varchar("section_id").notNull().references(() => sections.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
   pageNumber: integer("page_number").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const insertPageSchema = createInsertSchema(pages).omit({
   id: true,
+  updatedAt: true,
 });
 
 export type InsertPage = z.infer<typeof insertPageSchema>;

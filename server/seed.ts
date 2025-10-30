@@ -39,6 +39,8 @@ async function seed() {
       tags: ["spring", "first-meeting", "destiny"],
       songUrl: "https://open.spotify.com/track/5K4W6rqBFWDnAN6FQUkS6x",
       order: 1,
+      publishedAt: new Date(),
+      publishedDateManual: false,
     });
 
     const section2 = await storage.createSection({
@@ -48,6 +50,8 @@ async function seed() {
       tags: ["cafe", "promise", "beginning"],
       songUrl: "https://open.spotify.com/track/2FDTHlrBguDzQod7tMcvsp",
       order: 2,
+      publishedAt: new Date(),
+      publishedDateManual: false,
     });
 
     // Create pages for section 1
@@ -133,6 +137,8 @@ The promise was made. The thread was tied. And our story continued to unfold, on
       tags: ["summer", "han-river", "memories"],
       songUrl: "https://open.spotify.com/track/5fVZC9GiM4e8vu99W0Xf6J",
       order: 1,
+      publishedAt: new Date(),
+      publishedDateManual: false,
     });
 
     await storage.createPage({
@@ -164,6 +170,8 @@ The red thread that connected us seemed to glow brighter in the summer twilight.
       tags: ["autumn", "reflection", "photography"],
       songUrl: "https://open.spotify.com/track/1QY7OuUCxVBZCaNplxEpZg",
       order: 1,
+      publishedAt: new Date(),
+      publishedDateManual: false,
     });
 
     await storage.createPage({
@@ -211,6 +219,8 @@ We stopped at a café overlooking the river, ordering hot chocolates and watchin
       tags: ["winter", "snow", "romance"],
       songUrl: "https://open.spotify.com/track/40riOy7x9W7GXjyGp4pjAv",
       order: 1,
+      publishedAt: new Date(),
+      publishedDateManual: false,
     });
 
     await storage.createPage({
@@ -254,6 +264,8 @@ Around us, Seoul was transforming into a winter wonderland. But all I could see 
       tags: ["winter", "market", "celebration"],
       songUrl: "https://open.spotify.com/track/2aJDlirz6v2a4HREki98cP",
       order: 2,
+      publishedAt: new Date(),
+      publishedDateManual: false,
     });
 
     await storage.createPage({
@@ -313,6 +325,8 @@ And I believed you, with every fiber of my being.`,
       tags: ["music", "concert", "celebration"],
       songUrl: "https://open.spotify.com/track/5K4W6rqBFWDnAN6FQUkS6x",
       order: 1,
+      publishedAt: new Date(),
+      publishedDateManual: false,
     });
 
     await storage.createPage({
@@ -360,6 +374,8 @@ I knew then that this wasn't just a relationship. This was destiny, written in t
       mood: ["Social", "Fun"],
       tags: ["instagram", "behind-the-scenes", "memories"],
       order: 4,
+      publishedAt: new Date(),
+      publishedDateManual: false,
     });
 
     await storage.createPage({

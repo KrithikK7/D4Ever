@@ -311,6 +311,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       // Validate input - use partial schema to allow updating only some fields
       const validatedData = insertSectionSchema.partial().parse(req.body);
+
+      if (Object.prototype.hasOwnProperty.call(req.body, "publishedAt")) {
+        validatedData.publishedDateManual =
+          validatedData.publishedDateManual ?? (validatedData.publishedAt !== null);
+      }
+
       const section = await storage.updateSection(req.params.id, validatedData);
       if (!section) {
         return res.status(404).json({ error: "Section not found" });

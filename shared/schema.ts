@@ -42,6 +42,8 @@ export const sections = pgTable("sections", {
   thumbnail: text("thumbnail"),
   songUrl: text("song_url"),
   order: integer("order").notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }).defaultNow(),
+  publishedDateManual: boolean("published_date_manual").notNull().default(false),
 });
 
 export const insertSectionSchema = createInsertSchema(sections)
@@ -51,6 +53,8 @@ export const insertSectionSchema = createInsertSchema(sections)
   .extend({
     mood: z.array(z.string()).optional(),
     tags: z.array(z.string()).optional(),
+    publishedAt: z.union([z.null(), z.coerce.date()]).optional(),
+    publishedDateManual: z.boolean().optional(),
   });
 
 export type InsertSection = z.infer<typeof insertSectionSchema>;
@@ -61,10 +65,12 @@ export const pages = pgTable("pages", {
   sectionId: varchar("section_id").notNull().references(() => sections.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
   pageNumber: integer("page_number").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const insertPageSchema = createInsertSchema(pages).omit({
   id: true,
+  updatedAt: true,
 });
 
 export type InsertPage = z.infer<typeof insertPageSchema>;

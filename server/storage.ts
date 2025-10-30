@@ -22,7 +22,7 @@ import {
   likedSections,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, isNull, sql } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User methods
@@ -139,13 +139,41 @@ export class DBStorage implements IStorage {
   }
 
   async createSection(section: InsertSection): Promise<Section> {
-    const result = await db.insert(sections).values(section).returning();
+    const now = section.publishedAt ?? new Date();
+    const values: typeof sections.$inferInsert = {
+      ...section,
+      publishedAt: now,
+      publishedDateManual: section.publishedDateManual ?? false,
+    };
+
+    const result = await db.insert(sections).values(values).returning();
     return result[0];
   }
 
   async updateSection(id: string, section: Partial<InsertSection>): Promise<Section | undefined> {
-    const result = await db.update(sections).set(section).where(eq(sections.id, id)).returning();
-    return result[0];
+    const updateData: Partial<typeof sections.$inferInsert> = { ...section };
+
+    if (!("publishedAt" in section)) {
+      delete (updateData as any).publishedAt;
+    }
+    if (!("publishedDateManual" in section)) {
+      delete (updateData as any).publishedDateManual;
+    }
+
+    const result = await db.update(sections).set(updateData).where(eq(sections.id, id)).returning();
+    const updated = result[0];
+
+    if (!updated) {
+      return undefined;
+    }
+
+    if (!updated.publishedDateManual) {
+      await this.refreshSectionPublishedAt(updated.id);
+      const refreshed = await this.getSection(updated.id);
+      return refreshed ?? updated;
+    }
+
+    return updated;
   }
 
   async deleteSection(id: string): Promise<void> {
@@ -174,17 +202,40 @@ export class DBStorage implements IStorage {
   }
 
   async createPage(page: InsertPage): Promise<Page> {
-    const result = await db.insert(pages).values(page).returning();
-    return result[0];
+    const now = new Date();
+    const insertValues: typeof pages.$inferInsert = {
+      ...page,
+      updatedAt: now,
+    };
+    const result = await db.insert(pages).values(insertValues).returning();
+    const created = result[0];
+    if (created) {
+      await this.refreshSectionPublishedAt(created.sectionId);
+    }
+    return created;
   }
 
   async updatePage(id: string, page: Partial<InsertPage>): Promise<Page | undefined> {
-    const result = await db.update(pages).set(page).where(eq(pages.id, id)).returning();
-    return result[0];
+    const now = new Date();
+    const updateValues: Partial<typeof pages.$inferInsert> = {
+      ...page,
+      updatedAt: now,
+    };
+    const result = await db.update(pages).set(updateValues).where(eq(pages.id, id)).returning();
+    const updated = result[0];
+    if (updated) {
+      await this.refreshSectionPublishedAt(updated.sectionId);
+    }
+    return updated;
   }
 
   async deletePage(id: string): Promise<void> {
+    const existing = await db.select({ sectionId: pages.sectionId }).from(pages).where(eq(pages.id, id)).limit(1);
     await db.delete(pages).where(eq(pages.id, id));
+    const sectionId = existing[0]?.sectionId;
+    if (sectionId) {
+      await this.refreshSectionPublishedAt(sectionId);
+    }
   }
 
   // Reading progress methods
@@ -518,8 +569,38 @@ export class DBStorage implements IStorage {
     const result = await db.select({ count: sql<number>`count(*)` })
       .from(likedSections)
       .where(eq(likedSections.sectionId, sectionId));
-    
+
     return Number(result[0]?.count || 0);
+  }
+
+  private async refreshSectionPublishedAt(sectionId: string): Promise<void> {
+    const sectionRecord = await db
+      .select({
+        id: sections.id,
+        publishedDateManual: sections.publishedDateManual,
+      })
+      .from(sections)
+      .where(eq(sections.id, sectionId))
+      .limit(1);
+
+    const section = sectionRecord[0];
+
+    if (!section || section.publishedDateManual) {
+      return;
+    }
+
+    const latestPage = await db
+      .select({ updatedAt: pages.updatedAt })
+      .from(pages)
+      .where(eq(pages.sectionId, sectionId))
+      .orderBy(desc(pages.updatedAt))
+      .limit(1);
+
+    if (latestPage.length === 0) {
+      return;
+    }
+
+    await db.update(sections).set({ publishedAt: latestPage[0].updatedAt }).where(eq(sections.id, sectionId));
   }
 }
 

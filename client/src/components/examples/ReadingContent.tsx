@@ -18,7 +18,7 @@ Looking back now, I realize that was the moment the red string of fate tied itse
         content={mockContent}
         mood="Romantic"
         tags={["spring", "destiny", "first-meeting"]}
-        editedAt={new Date("2024-03-15T14:30:00")}
+        publishedAt={new Date("2024-03-15T14:30:00")}
       />
     </div>
   );

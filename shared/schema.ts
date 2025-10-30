@@ -42,6 +42,8 @@ export const sections = pgTable("sections", {
   thumbnail: text("thumbnail"),
   songUrl: text("song_url"),
   order: integer("order").notNull(),
+  publishedAt: timestamp("published_at").notNull().defaultNow(),
+  publishedDateManual: boolean("published_date_manual").notNull().default(false),
 });
 
 export const insertSectionSchema = createInsertSchema(sections)
@@ -51,6 +53,8 @@ export const insertSectionSchema = createInsertSchema(sections)
   .extend({
     mood: z.array(z.string()).optional(),
     tags: z.array(z.string()).optional(),
+    publishedAt: z.coerce.date().optional(),
+    publishedDateManual: z.boolean().optional(),
   });
 
 export type InsertSection = z.infer<typeof insertSectionSchema>;

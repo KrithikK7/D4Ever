@@ -80,6 +80,13 @@ export interface IStorage {
 }
 
 export class DBStorage implements IStorage {
+  private async touchSectionPublishedDate(sectionId: string) {
+    await db
+      .update(sections)
+      .set({ publishedAt: new Date() })
+      .where(and(eq(sections.id, sectionId), eq(sections.publishedDateManual, false)));
+  }
+
   // User methods
   async getUser(id: string): Promise<User | undefined> {
     const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
@@ -145,7 +152,21 @@ export class DBStorage implements IStorage {
 
   async updateSection(id: string, section: Partial<InsertSection>): Promise<Section | undefined> {
     const result = await db.update(sections).set(section).where(eq(sections.id, id)).returning();
-    return result[0];
+    const updatedSection = result[0];
+
+    if (!updatedSection) {
+      return undefined;
+    }
+
+    const manualFieldsTouched = Object.prototype.hasOwnProperty.call(section, "publishedAt") ||
+      Object.prototype.hasOwnProperty.call(section, "publishedDateManual");
+
+    if (!manualFieldsTouched && !updatedSection.publishedDateManual) {
+      await this.touchSectionPublishedDate(id);
+      return await this.getSection(id);
+    }
+
+    return updatedSection;
   }
 
   async deleteSection(id: string): Promise<void> {
@@ -175,16 +196,33 @@ export class DBStorage implements IStorage {
 
   async createPage(page: InsertPage): Promise<Page> {
     const result = await db.insert(pages).values(page).returning();
-    return result[0];
+    const newPage = result[0];
+
+    if (newPage) {
+      await this.touchSectionPublishedDate(newPage.sectionId);
+    }
+
+    return newPage;
   }
 
   async updatePage(id: string, page: Partial<InsertPage>): Promise<Page | undefined> {
     const result = await db.update(pages).set(page).where(eq(pages.id, id)).returning();
-    return result[0];
+    const updatedPage = result[0];
+
+    if (updatedPage) {
+      await this.touchSectionPublishedDate(updatedPage.sectionId);
+    }
+
+    return updatedPage;
   }
 
   async deletePage(id: string): Promise<void> {
+    const page = await db.select({ sectionId: pages.sectionId }).from(pages).where(eq(pages.id, id)).limit(1);
     await db.delete(pages).where(eq(pages.id, id));
+
+    if (page[0]) {
+      await this.touchSectionPublishedDate(page[0].sectionId);
+    }
   }
 
   // Reading progress methods

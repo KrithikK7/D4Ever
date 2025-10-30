@@ -1,14 +1,16 @@
 import { useParams, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as DatePickerCalendar } from "@/components/ui/calendar";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChevronLeft, ChevronRight, Pencil, Save, X, ArrowUp, ArrowDown, Plus, Trash2, Heart, CheckCircle2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pencil, Save, X, ArrowUp, ArrowDown, Plus, Trash2, Heart, CheckCircle2, Calendar as CalendarIcon } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMusicPlayer } from "@/contexts/MusicPlayerContext";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -42,6 +44,8 @@ export default function SectionReader() {
   const [editingMetadata, setEditingMetadata] = useState(false);
   const [editedTags, setEditedTags] = useState("");
   const [editedMood, setEditedMood] = useState("");
+  const [isPublishedDatePopoverOpen, setIsPublishedDatePopoverOpen] = useState(false);
+  const [manualPublishedDateDraft, setManualPublishedDateDraft] = useState<Date | undefined>();
   const pageStartTimeRef = useRef<number | null>(null);
   const previousPageIdRef = useRef<string | null>(null);
   const hasCompletedSectionRef = useRef<boolean>(false);
@@ -73,6 +77,25 @@ export default function SectionReader() {
     queryKey: [`/api/chapters/${section?.chapterId}/sections`],
     enabled: !!section?.chapterId,
   });
+
+  const publishedDate = useMemo(() => {
+    if (!section?.publishedAt) {
+      return undefined;
+    }
+
+    const value = section.publishedAt as unknown as string | Date;
+    const date = typeof value === "string" ? new Date(value) : value;
+
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }, [section?.publishedAt]);
+
+  const publishedDateFormatter = useMemo(
+    () => new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }),
+    [],
+  );
+
+  const formattedPublishedDate = publishedDate ? publishedDateFormatter.format(publishedDate) : undefined;
+  const isManualPublishedDate = Boolean(section?.publishedDateManual);
 
   // Check if user has liked this section
   const { data: likeStatus } = useQuery<{ isLiked: boolean }>({
@@ -201,16 +224,20 @@ export default function SectionReader() {
       // Optimistically update the cache with new content
       queryClient.setQueryData<Page[]>([`/api/sections/${sectionId}/pages`], (old) => {
         if (!old) return old;
-        return old.map(page => 
-          page.id === variables.pageId 
+        return old.map(page =>
+          page.id === variables.pageId
             ? { ...page, content: variables.content }
             : page
         );
       });
-      
+
       // Invalidate to refetch fresh data from server
       queryClient.invalidateQueries({ queryKey: [`/api/sections/${sectionId}/pages`] });
-      
+      queryClient.invalidateQueries({ queryKey: [`/api/sections/${sectionId}`] });
+      if (section?.chapterId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/chapters/${section.chapterId}/sections`] });
+      }
+
       toast({ title: "Page updated successfully" });
       setIsEditMode(false);
     },
@@ -248,6 +275,10 @@ export default function SectionReader() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/sections/${sectionId}/pages`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/sections/${sectionId}`] });
+      if (section?.chapterId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/chapters/${section.chapterId}/sections`] });
+      }
       toast({ title: "Page created successfully" });
       setCreatingPage(false);
       // Navigate to the new page (last page)
@@ -268,9 +299,13 @@ export default function SectionReader() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`/api/sections/${sectionId}/pages`] });
+      queryClient.invalidateQueries({ queryKey: [`/api/sections/${sectionId}`] });
+      if (section?.chapterId) {
+        queryClient.invalidateQueries({ queryKey: [`/api/chapters/${section.chapterId}/sections`] });
+      }
       toast({ title: "Page deleted successfully" });
       setDeletingPageId(null);
-      
+
       // Smart navigation: adjust current page index if needed
       const deletedPageIndex = pages.findIndex(p => p.id === deletingPageId);
       if (deletedPageIndex >= 0) {
@@ -294,8 +329,16 @@ export default function SectionReader() {
     },
   });
 
+  type SectionUpdatePayload = {
+    title?: string;
+    tags?: string[];
+    mood?: string[];
+    publishedAt?: string | null;
+    publishedDateManual?: boolean;
+  };
+
   const updateSectionMutation = useMutation({
-    mutationFn: async (data: { title?: string; tags?: string[]; mood?: string[] }) => {
+    mutationFn: async (data: SectionUpdatePayload) => {
       return apiRequest("PATCH", `/api/sections/${sectionId}`, data);
     },
     onSuccess: () => {
@@ -419,6 +462,11 @@ export default function SectionReader() {
     setIsEditMode(false);
     setEditedContent("");
     setCurrentPageIndex(0); // Reset to first page when section changes
+  }, [sectionId]);
+
+  useEffect(() => {
+    setIsPublishedDatePopoverOpen(false);
+    setManualPublishedDateDraft(undefined);
   }, [sectionId]);
 
   // Ensure currentPageIndex stays within bounds when pages change
@@ -569,6 +617,50 @@ export default function SectionReader() {
   const handleCancelEdit = () => {
     setIsEditMode(false);
     setEditedContent("");
+  };
+
+  const handlePublishedDatePopoverChange = (open: boolean) => {
+    setIsPublishedDatePopoverOpen(open);
+    if (open) {
+      if (publishedDate) {
+        setManualPublishedDateDraft(publishedDate);
+      } else {
+        setManualPublishedDateDraft(new Date());
+      }
+    }
+  };
+
+  const handleSaveManualPublishedDate = () => {
+    if (!manualPublishedDateDraft) return;
+
+    updateSectionMutation.mutate(
+      {
+        publishedAt: manualPublishedDateDraft.toISOString(),
+        publishedDateManual: true,
+      },
+      {
+        onSuccess: () => {
+          setIsPublishedDatePopoverOpen(false);
+        },
+      },
+    );
+  };
+
+  const handleUseAutomaticPublishedDate = () => {
+    const now = new Date();
+    setManualPublishedDateDraft(undefined);
+
+    updateSectionMutation.mutate(
+      {
+        publishedAt: now.toISOString(),
+        publishedDateManual: false,
+      },
+      {
+        onSuccess: () => {
+          setIsPublishedDatePopoverOpen(false);
+        },
+      },
+    );
   };
 
   const handleSaveEdit = () => {
@@ -944,7 +1036,69 @@ export default function SectionReader() {
             )}
           </div>
 
-        <Card className="p-8 md:p-12 bg-white/80 backdrop-blur-sm border-0 shadow-md">
+        <Card className="relative p-8 md:p-12 bg-white/80 backdrop-blur-sm border-0 shadow-md">
+          {(formattedPublishedDate || isAdmin) && (
+            <div className="absolute top-6 right-6 flex flex-wrap items-center justify-end gap-2">
+              {formattedPublishedDate ? (
+                <span className="inline-flex items-center rounded-full bg-kdrama-ink/10 text-kdrama-ink px-3 py-1 text-xs font-medium uppercase tracking-wide font-noto shadow-sm">
+                  {formattedPublishedDate}
+                </span>
+              ) : (
+                isAdmin && (
+                  <span className="inline-flex items-center rounded-full border border-dashed border-muted-foreground/60 px-3 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground font-noto">
+                    Set published date
+                  </span>
+                )
+              )}
+              {isManualPublishedDate && (
+                <Badge variant="outline" className="font-noto text-[0.65rem] uppercase tracking-wide">
+                  Manual
+                </Badge>
+              )}
+              {isAdmin && (
+                <Popover open={isPublishedDatePopoverOpen} onOpenChange={handlePublishedDatePopoverChange}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 px-2 text-muted-foreground hover:text-foreground"
+                    >
+                      <CalendarIcon className="mr-1 h-4 w-4" />
+                      Edit
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-4" align="end">
+                    <div className="space-y-3">
+                      <DatePickerCalendar
+                        mode="single"
+                        selected={manualPublishedDateDraft}
+                        onSelect={(date) => setManualPublishedDateDraft(date ?? undefined)}
+                        initialFocus
+                      />
+                      <div className="flex items-center justify-between gap-2 pt-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="text-muted-foreground"
+                          onClick={handleUseAutomaticPublishedDate}
+                          disabled={updateSectionMutation.isPending}
+                        >
+                          Use last edit date
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={handleSaveManualPublishedDate}
+                          disabled={!manualPublishedDateDraft || updateSectionMutation.isPending}
+                        >
+                          Save date
+                        </Button>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+            </div>
+          )}
           {isAdmin && currentPage && (
             <div className="flex items-center justify-between gap-4 mb-6 pb-4 border-b">
               <div className="flex items-center gap-2">

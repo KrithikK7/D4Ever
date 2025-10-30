@@ -1,6 +1,7 @@
+import { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Calendar, Clock } from "lucide-react";
+import { Calendar as CalendarIcon, Clock } from "lucide-react";
 import { Knot } from "./Knot";
 
 interface ReadingContentProps {
@@ -8,7 +9,7 @@ interface ReadingContentProps {
   content: string;
   mood?: string;
   tags?: string[];
-  editedAt?: Date;
+  publishedAt?: Date | string;
   coverUrl?: string;
   showMilestones?: boolean;
 }
@@ -18,11 +19,31 @@ export function ReadingContent({
   content,
   mood,
   tags = [],
-  editedAt,
+  publishedAt,
   coverUrl,
   showMilestones = true,
 }: ReadingContentProps) {
   const paragraphs = content.split("\n\n").filter((p) => p.trim());
+
+  const publishedDate = useMemo(() => {
+    if (!publishedAt) {
+      return undefined;
+    }
+
+    const value = publishedAt as unknown as string | Date;
+    const date = typeof value === "string" ? new Date(value) : value;
+
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  }, [publishedAt]);
+
+  const publishedDateFormatter = useMemo(
+    () => new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }),
+    [],
+  );
+  const publishedTimeFormatter = useMemo(
+    () => new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }),
+    [],
+  );
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -53,15 +74,15 @@ export function ReadingContent({
           ))}
         </div>
 
-        {editedAt && (
+        {publishedDate && (
           <div className="flex items-center gap-4 text-sm text-muted-foreground font-noto">
             <div className="flex items-center gap-1">
-              <Calendar className="w-4 h-4" />
-              <span>{editedAt.toLocaleDateString()}</span>
+              <CalendarIcon className="w-4 h-4" />
+              <span>{publishedDateFormatter.format(publishedDate)}</span>
             </div>
             <div className="flex items-center gap-1">
               <Clock className="w-4 h-4" />
-              <span>{editedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+              <span>{publishedTimeFormatter.format(publishedDate)}</span>
             </div>
           </div>
         )}

@@ -80,6 +80,13 @@ export interface IStorage {
 }
 
 export class DBStorage implements IStorage {
+  private async touchSectionPublishedDate(sectionId: string) {
+    await db
+      .update(sections)
+      .set({ publishedAt: new Date() })
+      .where(and(eq(sections.id, sectionId), eq(sections.publishedDateManual, false)));
+  }
+
   // User methods
   async getUser(id: string): Promise<User | undefined> {
     const result = await db.select().from(users).where(eq(users.id, id)).limit(1);
@@ -151,29 +158,22 @@ export class DBStorage implements IStorage {
   }
 
   async updateSection(id: string, section: Partial<InsertSection>): Promise<Section | undefined> {
-    const updateData: Partial<typeof sections.$inferInsert> = { ...section };
+    const result = await db.update(sections).set(section).where(eq(sections.id, id)).returning();
+    const updatedSection = result[0];
 
-    if (!("publishedAt" in section)) {
-      delete (updateData as any).publishedAt;
-    }
-    if (!("publishedDateManual" in section)) {
-      delete (updateData as any).publishedDateManual;
-    }
-
-    const result = await db.update(sections).set(updateData).where(eq(sections.id, id)).returning();
-    const updated = result[0];
-
-    if (!updated) {
+    if (!updatedSection) {
       return undefined;
     }
 
-    if (!updated.publishedDateManual) {
-      await this.refreshSectionPublishedAt(updated.id);
-      const refreshed = await this.getSection(updated.id);
-      return refreshed ?? updated;
+    const manualFieldsTouched = Object.prototype.hasOwnProperty.call(section, "publishedAt") ||
+      Object.prototype.hasOwnProperty.call(section, "publishedDateManual");
+
+    if (!manualFieldsTouched && !updatedSection.publishedDateManual) {
+      await this.touchSectionPublishedDate(id);
+      return await this.getSection(id);
     }
 
-    return updated;
+    return updatedSection;
   }
 
   async deleteSection(id: string): Promise<void> {
@@ -202,39 +202,33 @@ export class DBStorage implements IStorage {
   }
 
   async createPage(page: InsertPage): Promise<Page> {
-    const now = new Date();
-    const insertValues: typeof pages.$inferInsert = {
-      ...page,
-      updatedAt: now,
-    };
-    const result = await db.insert(pages).values(insertValues).returning();
-    const created = result[0];
-    if (created) {
-      await this.refreshSectionPublishedAt(created.sectionId);
+    const result = await db.insert(pages).values(page).returning();
+    const newPage = result[0];
+
+    if (newPage) {
+      await this.touchSectionPublishedDate(newPage.sectionId);
     }
-    return created;
+
+    return newPage;
   }
 
   async updatePage(id: string, page: Partial<InsertPage>): Promise<Page | undefined> {
-    const now = new Date();
-    const updateValues: Partial<typeof pages.$inferInsert> = {
-      ...page,
-      updatedAt: now,
-    };
-    const result = await db.update(pages).set(updateValues).where(eq(pages.id, id)).returning();
-    const updated = result[0];
-    if (updated) {
-      await this.refreshSectionPublishedAt(updated.sectionId);
+    const result = await db.update(pages).set(page).where(eq(pages.id, id)).returning();
+    const updatedPage = result[0];
+
+    if (updatedPage) {
+      await this.touchSectionPublishedDate(updatedPage.sectionId);
     }
-    return updated;
+
+    return updatedPage;
   }
 
   async deletePage(id: string): Promise<void> {
-    const existing = await db.select({ sectionId: pages.sectionId }).from(pages).where(eq(pages.id, id)).limit(1);
+    const page = await db.select({ sectionId: pages.sectionId }).from(pages).where(eq(pages.id, id)).limit(1);
     await db.delete(pages).where(eq(pages.id, id));
-    const sectionId = existing[0]?.sectionId;
-    if (sectionId) {
-      await this.refreshSectionPublishedAt(sectionId);
+
+    if (page[0]) {
+      await this.touchSectionPublishedDate(page[0].sectionId);
     }
   }
 

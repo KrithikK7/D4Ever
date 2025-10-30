@@ -4,9 +4,9 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "tsx server/dev.ts",
+    "dev": "tsx scripts/dev.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
-    "start": "node scripts/start.mjs",
+    "start": "node scripts/start.js",
     "check": "tsc",
     "db:push": "drizzle-kit push"
   },

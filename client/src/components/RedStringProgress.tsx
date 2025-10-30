@@ -1,11 +1,13 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { SVG_CONFIG, RED_STRING_PATH_D } from "./redStringPath";
 
 interface RedStringProgressProps {
   currentPage: number;
   totalPages: number;
-  sectionTitle?: string;
   initialProgress?: number;
   className?: string;
+  /** Fill from original end -> start */
+  reversePath?: boolean;
 }
 
 export function RedStringProgress({
@@ -13,27 +15,36 @@ export function RedStringProgress({
   totalPages,
   initialProgress = 0,
   className = "",
+  reversePath = true,
 }: RedStringProgressProps) {
   const [fillProgress, setFillProgress] = useState(0);
   const [pathLength, setPathLength] = useState(1000);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [reversedD, setReversedD] = useState<string | null>(null);
+
+  const [autoViewBox, setAutoViewBox] = useState<string>("0 0 296 133");
+  const [vbW, setVbW] = useState<number>(296);
+  const [vbH, setVbH] = useState<number>(133);
+
+  // Resolve % height to px (so height changes work even if parent has no height)
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [resolvedHeight, setResolvedHeight] = useState<string | number>(SVG_CONFIG.HEIGHT_PCT);
+
   const appliedInitialProgressRef = useRef<number | null>(null);
   const previousProgressRef = useRef(0);
-  const pathRef = useRef<SVGPathElement>(null);
+  const measurePathRef = useRef<SVGPathElement>(null);
 
-  // Detect reduced motion preference
+  // Reduced motion
   useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setPrefersReducedMotion(mediaQuery.matches);
-
-    const handler = (e: MediaQueryListEvent) =>
-      setPrefersReducedMotion(e.matches);
-    mediaQuery.addEventListener("change", handler);
-    return () => mediaQuery.removeEventListener("change", handler);
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setPrefersReducedMotion(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  // Initialize from saved progress
+  // Initialize from saved
   useEffect(() => {
     if (appliedInitialProgressRef.current !== initialProgress) {
       if (initialProgress > 0) {
@@ -45,115 +56,168 @@ export function RedStringProgress({
     }
   }, [initialProgress]);
 
-  // Calculate progress percentage
+  // Progress %
   useEffect(() => {
     if (!isInitialized) return;
-
     const progress = totalPages > 0 ? (currentPage / totalPages) * 100 : 0;
-    const clampedProgress = Math.min(100, Math.max(0, progress));
-
-    if (clampedProgress === previousProgressRef.current) return;
-
-    setFillProgress(clampedProgress);
-    previousProgressRef.current = clampedProgress;
+    const clamped = Math.min(100, Math.max(0, progress));
+    if (clamped === previousProgressRef.current) return;
+    setFillProgress(clamped);
+    previousProgressRef.current = clamped;
   }, [currentPage, totalPages, isInitialized]);
 
-  // Measure path length for accurate animation
+  const originalD = RED_STRING_PATH_D;
+
+  // Measure, fit viewBox, reverse geometry
   useEffect(() => {
-    if (pathRef.current) {
-      const length = pathRef.current.getTotalLength();
-      setPathLength(length);
+    const meas = measurePathRef.current;
+    if (!meas) return;
+
+    // 1) Fit viewBox to path bounds (+ padding)
+    const bb = meas.getBBox();
+    const minX = bb.x - SVG_CONFIG.VIEWBOX_PAD;
+    const minY = bb.y - SVG_CONFIG.VIEWBOX_PAD;
+    const w = Math.max(bb.width + 2 * SVG_CONFIG.VIEWBOX_PAD, 1);
+    const h = Math.max(bb.height + 2 * SVG_CONFIG.VIEWBOX_PAD, 1);
+    setAutoViewBox(`${minX} ${minY} ${w} ${h}`);
+    setVbW(w);
+    setVbH(h);
+
+    // 2) Length
+    const len = meas.getTotalLength();
+    setPathLength(len);
+
+    // 3) Reverse geometry for end→start fill
+    if (!reversePath || len === 0) {
+      setReversedD(null);
+      return;
     }
+    const samples = Math.max(300, Math.min(2000, Math.round(len / 1)));
+    const pts: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i <= samples; i++) {
+      const t = i / samples;
+      const p = meas.getPointAtLength(len * (1 - t));
+      pts.push({ x: p.x, y: p.y });
+    }
+    const dRev =
+      `M ${pts[0].x},${pts[0].y} ` +
+      pts.slice(1).map(p => `L ${p.x},${p.y}`).join(" ");
+    setReversedD(dRev);
+  }, [originalD, reversePath]);
+
+  // Resolve % height -> px when unlocked
+  useLayoutEffect(() => {
+    if (SVG_CONFIG.ASPECT_RATIO_LOCKED) return;
+    const isPercent =
+      typeof SVG_CONFIG.HEIGHT_PCT === "string" &&
+      SVG_CONFIG.HEIGHT_PCT.trim().endsWith("%");
+
+    const compute = () => {
+      if (!isPercent) {
+        setResolvedHeight(SVG_CONFIG.HEIGHT_PCT);
+        return;
+      }
+      const pct = parseFloat(SVG_CONFIG.HEIGHT_PCT) / 100;
+      const parent = containerRef.current?.parentElement ?? null;
+      const parentH = parent ? parent.clientHeight : 0;
+      const basis = parentH > 0 ? parentH : window.innerHeight;
+      setResolvedHeight(Math.max(0, Math.round(basis * pct)));
+    };
+
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
   }, []);
 
-  const newStringPath =
-    "m 203.25178,125.25123 c 0.70716,-2.76218 3.38279,-14.86559 3.97057,-17.47611 26.19101,-116.3227103 -63.33859,-83.67879 -19.63313,-44.676399 13.13075,11.717772 22.43272,18.749796 45.63425,31.820896 54.54392,30.728533 55.41035,-56.489195 -23.63684,-10.528016 -41.64117,24.211829 -82.82698,33.890659 -91.10968,-41.2075 -7.54605,-69.404139 70.93301,-37.4620695 24.50307,-2.496156 -5.57973,4.490225 -11.96325,6.702687 -18.6596,8.631445 -5.52876,1.646533 -12.84224,1.84604 -21.85994,8.122346 -5.915259,4.117009 -16.063366,14.278172 -21.920676,28.089696 -11.999915,28.295778 -2.135942,36.382278 1.802127,38.862768 8.255453,5.1999 46.183819,0.40083 11.36262,-41.875123 C 90.858738,79.064014 86.3198,75.318163 82.131326,70.385164 79.56687,67.364861 76.952534,64.073151 74.424422,60.623199 62.472301,44.312907 60.866417,29.552325 64.162156,16.935577 71.444414,-10.942364 115.01237,6.1584174 85.004239,41.711793 78.652067,49.237791 50.197426,80.83625 17.115888,46.705469";
+  // Dash math (forward because path is reversed when reversePath=true)
+  const dashOffset = pathLength - (pathLength * fillProgress) / 100;
+  const drawD = reversePath && reversedD ? reversedD : originalD;
 
-  const safePathLength = pathLength > 0 ? pathLength : 0.0001;
-  const filledLength = (fillProgress / 100) * safePathLength;
-  const dashArray = `${filledLength} ${safePathLength}`;
-  const dashOffset = safePathLength;
+  // Container sizing (and centering)
+  const centeredWrapperStyle: React.CSSProperties = {
+    display: "flex",
+    justifyContent: "center",
+    width: "100%",
+  };
+
+  const containerStyle: React.CSSProperties = SVG_CONFIG.ASPECT_RATIO_LOCKED
+    ? { width: SVG_CONFIG.WIDTH_PCT, aspectRatio: `${vbW} / ${vbH}`, margin: "0 auto" }
+    : { width: SVG_CONFIG.WIDTH_PCT, height: resolvedHeight, margin: "0 auto" };
 
   return (
-    <div
-      className={`w-full ${className}`}
-      data-testid="red-string-progress"
-      role="progressbar"
-      aria-valuenow={Math.round(fillProgress)}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-label={`Reading progress: ${Math.round(
-        fillProgress
-      )}% complete`}
-    >
-      <svg
-        width="100%"
-        height="133"
-        viewBox="0 0 296 133"
-        className="w-full h-auto"
-        preserveAspectRatio="none"
+    <div style={centeredWrapperStyle}>
+      <div
+        ref={containerRef}
+        className={`w-full ${className}`}
+        data-testid="red-string-progress"
+        role="progressbar"
+        aria-valuenow={Math.round(fillProgress)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`Reading progress: ${Math.round(fillProgress)}% complete`}
+        style={containerStyle}
       >
-        <defs>
-          <filter id="string-shadow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur in="SourceAlpha" stdDeviation="1.5" />
-            <feOffset dx="0.5" dy="1.5" result="offsetblur" />
-            <feComponentTransfer>
-              <feFuncA type="linear" slope="0.25" />
-            </feComponentTransfer>
-            <feMerge>
-              <feMergeNode />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
+        <svg
+          width="100%"
+          height="100%"
+          viewBox={autoViewBox}
+          className="w-full h-full"
+          preserveAspectRatio={SVG_CONFIG.ASPECT_RATIO_LOCKED ? "xMidYMid meet" : "none"}
+        >
+          <defs>
+            <filter id="string-shadow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur in="SourceAlpha" stdDeviation="1.5" />
+              <feOffset dx="0.5" dy="1.5" result="offsetblur" />
+              <feComponentTransfer>
+                <feFuncA type="linear" slope="0.25" />
+              </feComponentTransfer>
+              <feMerge>
+                <feMergeNode />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
 
-          {/* Red gradient (adjusted from provided SVG) */}
-          <linearGradient
-            id="filled-gradient"
-            x1="139.509"
-            y1="-16.7444"
-            x2="143.219"
-            y2="177.453"
-            gradientUnits="userSpaceOnUse"
-          >
-            <stop offset="0%" stopColor="#FF3355" />
-            <stop offset="100%" stopColor="#5E161E" />
-          </linearGradient>
+            <linearGradient id="filled-gradient" x1="139.509" y1="-16.7444" x2="143.219" y2="177.453" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stopColor="#FF3355" />
+              <stop offset="100%" stopColor="#5E161E" />
+            </linearGradient>
 
-          <linearGradient id="outline-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#ffcccc" stopOpacity="0.08" />
-            <stop offset="50%" stopColor="#ffb3b3" stopOpacity="0.08" />
-            <stop offset="100%" stopColor="#ff9999" stopOpacity="0.08" />
-          </linearGradient>
-        </defs>
+            <linearGradient id="outline-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#ffcccc" stopOpacity="0.08" />
+              <stop offset="50%" stopColor="#ffb3b3" stopOpacity="0.08" />
+              <stop offset="100%" stopColor="#ff9999" stopOpacity="0.08" />
+            </linearGradient>
+          </defs>
 
-        {/* Outline */}
-        <path
-          d={newStringPath}
-          fill="none"
-          stroke="url(#outline-gradient)"
-          strokeWidth="4"
-          strokeLinecap="round"
-        />
+          {/* Hidden measuring path */}
+          <path ref={measurePathRef} d={originalD} fill="none" stroke="none" />
 
-        {/* Animated filled portion */}
-        <g filter="url(#string-shadow)">
+          {/* Outline */}
           <path
-            ref={pathRef}
-            d={newStringPath}
+            d={originalD}
             fill="none"
-            stroke="url(#filled-gradient)"
+            stroke="url(#outline-gradient)"
             strokeWidth="4"
             strokeLinecap="round"
-            strokeDasharray={dashArray}
-            strokeDashoffset={dashOffset}
-            style={{
-              transition: prefersReducedMotion
-                ? 'none'
-                : 'stroke-dasharray 0.6s ease-out, stroke-dashoffset 0.6s ease-out',
-            }}
           />
-        </g>
-      </svg>
+
+          {/* Animated filled portion */}
+          <g filter="url(#string-shadow)">
+            <path
+              d={drawD}
+              fill="none"
+              stroke="url(#filled-gradient)"
+              strokeWidth="4"
+              strokeLinecap="round"
+              strokeDasharray={pathLength}
+              strokeDashoffset={dashOffset}
+              style={{
+                transition: prefersReducedMotion ? "none" : "stroke-dashoffset 0.6s ease-out",
+              }}
+            />
+          </g>
+        </svg>
+      </div>
     </div>
   );
 }

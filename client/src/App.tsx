@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { MusicPlayerProvider } from "@/contexts/MusicPlayerContext";
 import { FloatingMusicPlayer } from "@/components/FloatingMusicPlayer";
+import { AutoplayConsentProvider } from "@/contexts/AutoplayConsentContext";
 import { PrivateRoute } from "@/components/PrivateRoute";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
@@ -38,11 +39,13 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <MusicPlayerProvider>
-          <TooltipProvider>
-            <Toaster />
-            <FloatingMusicPlayer />
-            <Router />
-          </TooltipProvider>
+          <AutoplayConsentProvider>
+            <TooltipProvider>
+              <Toaster />
+              <FloatingMusicPlayer />
+              <Router />
+            </TooltipProvider>
+          </AutoplayConsentProvider>
         </MusicPlayerProvider>
       </AuthProvider>
     </QueryClientProvider>

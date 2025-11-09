@@ -71,7 +71,9 @@ export default function ChapterView() {
                 completed={sectionProgress?.completed}
                 inProgress={sectionProgress && !sectionProgress.completed}
                 showBadge={isAuthenticated}
-                onClick={() => setLocation(`/read/${section.id}`)}
+                onClick={() => {
+                  setLocation(`/read/${section.id}`);
+                }}
               />
             );
           })}

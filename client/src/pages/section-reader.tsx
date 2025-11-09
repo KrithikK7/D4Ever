@@ -23,12 +23,14 @@ import { InstagramEmbed } from "@/components/InstagramEmbed";
 import InstagramGallery from "@/components/InstagramGallery";
 import { MediaToolbar, ImageEmbedDialog, InstagramEmbedDialog, SpotifyEmbedDialog } from "@/components/admin/MediaEmbedDialogs";
 import type { Section, Page, ReadingProgress, Chapter } from "@shared/schema";
+import { useAutoplayConsent } from "@/contexts/AutoplayConsentContext";
 
 export default function SectionReader() {
   const { sectionId } = useParams();
   const [, setLocation] = useLocation();
   const { user, isAdmin } = useAuth();
   const { setCurrentSong } = useMusicPlayer();
+  const { autoplayEnabled } = useAutoplayConsent();
   const lastSongRef = useRef<string | null>(null);
   const { toast } = useToast();
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
@@ -494,9 +496,6 @@ export default function SectionReader() {
     };
   }, [sectionId]);
 
-  // Simplified automatic music playback:
-  // 1. Section-specific music takes priority (show toast for special moments)
-  // 2. Otherwise use chapter-level playlist (background music, no toast)
   useEffect(() => {
     if (isSectionLoading) return;
     if (!section) return;
@@ -599,10 +598,8 @@ export default function SectionReader() {
 
     // We're on the last page of this section
     if (isLastSection) {
-      // Last page of last section - go back to chapters
       setLocation("/");
     } else if (nextSection) {
-      // Navigate to next section
       setLocation(`/read/${nextSection.id}`);
     }
   };

@@ -29,7 +29,7 @@ import type { Section } from "@shared/schema";
 interface MediaToolbarProps {
   onInsertImage: () => void;
   onInsertInstagram: () => void;
-  onInsertSpotify: () => void;
+  onInsertSpotify?: () => void;
 }
 
 export function MediaToolbar({ onInsertImage, onInsertInstagram, onInsertSpotify }: MediaToolbarProps) {
@@ -56,16 +56,18 @@ export function MediaToolbar({ onInsertImage, onInsertInstagram, onInsertSpotify
         <SiInstagram className="w-4 h-4 mr-1" />
         Instagram
       </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={onInsertSpotify}
-        data-testid="button-insert-spotify"
-      >
-        <Music className="w-4 h-4 mr-1" />
-        Spotify
-      </Button>
+      {onInsertSpotify && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onInsertSpotify}
+          data-testid="button-insert-spotify"
+        >
+          <Music className="w-4 h-4 mr-1" />
+          Section Music
+        </Button>
+      )}
     </div>
   );
 }

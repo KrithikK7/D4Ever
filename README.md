@@ -226,9 +226,17 @@ Fonts are loaded from Google Fonts in `client/index.html`. The application uses:
 - Run `npm run db:push` to ensure the schema is up to date
 
 ### Port Already in Use
-If port 5000 is already in use, you can change it in `server/index.ts`:
-```typescript
-const PORT = process.env.PORT || 5000;
+The dev server will always respect an explicit `PORT` environment variable (required on hosts like Replit).  
+When `PORT` is **not** set, it now starts at `5000` and automatically searches for the next open port (up to 10 tries), so you rarely have to do anything manually.
+
+To force a specific port, set it in your `.env` file or inline when running the command:
+
+```bash
+PORT=5050 npm run dev   # macOS/Linux
+```
+
+```powershell
+$env:PORT=5050; npm run dev   # Windows PowerShell
 ```
 
 ### Build Errors

@@ -64,7 +64,9 @@ export function SectionManagement() {
       return apiRequest("POST", "/api/sections", {
         title: data.title,
         chapterId: data.chapterId,
-        mood: data.mood || null,
+        mood: data.mood
+          ? data.mood.split(",").map(t => t.trim()).filter(Boolean)
+          : [],
         tags: data.tags ? data.tags.split(",").map(t => t.trim()) : [],
         thumbnail: data.thumbnail || null,
         songUrl: data.songUrl || null,
@@ -94,7 +96,9 @@ export function SectionManagement() {
       return apiRequest("PATCH", `/api/sections/${id}`, {
         title: data.title,
         chapterId: data.chapterId,
-        mood: data.mood || null,
+        mood: data.mood
+          ? data.mood.split(",").map(t => t.trim()).filter(Boolean)
+          : [],
         tags: data.tags ? data.tags.split(",").map(t => t.trim()) : [],
         thumbnail: data.thumbnail || null,
         songUrl: data.songUrl || null,
@@ -161,7 +165,7 @@ export function SectionManagement() {
     setFormData({
       title: section.title,
       chapterId: section.chapterId,
-      mood: section.mood || "",
+      mood: section.mood && section.mood.length > 0 ? section.mood.join(", ") : "",
       tags: section.tags ? section.tags.join(", ") : "",
       thumbnail: section.thumbnail || "",
       songUrl: section.songUrl || "",

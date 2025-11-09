@@ -5,7 +5,7 @@ import { BookOpen, CheckCircle2, PlayCircle } from "lucide-react";
 interface PolaroidCardProps {
   title: string;
   coverUrl?: string;
-  mood?: string[];
+  mood?: string | string[];
   tags?: string[];
   description?: string;
   completed?: boolean;
@@ -25,6 +25,8 @@ export function PolaroidCard({
   showBadge,
   onClick,
 }: PolaroidCardProps) {
+  const moodList = Array.isArray(mood) ? mood : mood ? [mood] : [];
+
   return (
     <Card
       className="bg-white dark:bg-card shadow-lg hover:shadow-xl transition-all duration-180 hover:-translate-y-1 hover:animate-sway cursor-pointer border-0 overflow-hidden rounded-2xl relative"
@@ -75,9 +77,9 @@ export function PolaroidCard({
       </CardHeader>
       
       <CardContent className="space-y-2">
-        {mood && mood.length > 0 && (
+        {moodList.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {mood.slice(0, 2).map((m, idx) => (
+            {moodList.slice(0, 2).map((m, idx) => (
               <Badge key={`mood-${idx}`} variant="secondary" className="font-noto text-xs">
                 {m}
               </Badge>

@@ -3,6 +3,8 @@ import { db } from './db';
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { ensureSchemaColumns } from "./ensure-schema";
+import { createServer as createNetServer } from "net";
 
 const app = express();
 
@@ -52,6 +54,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await ensureSchemaColumns();
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -71,11 +74,48 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
+  const envPort = process.env.PORT;
+  const preferredPort = parseInt(envPort || '5000', 10);
+  const usingExplicitPort = Boolean(envPort);
+
+  const pickPort = async () => {
+    if (usingExplicitPort) {
+      return preferredPort;
+    }
+
+    let candidate = preferredPort;
+    for (let attemptsLeft = 10; attemptsLeft > 0; attemptsLeft--) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const tester = createNetServer()
+            .once("error", (err: NodeJS.ErrnoException) => {
+              reject(err);
+            })
+            .once("listening", () => {
+              tester.close(() => resolve());
+            })
+            .listen(candidate, "0.0.0.0");
+        });
+
+        return candidate;
+      } catch (err) {
+        const error = err as NodeJS.ErrnoException;
+        if (error.code === "EADDRINUSE" && attemptsLeft > 1) {
+          const nextPort = candidate + 1;
+          log(`port ${candidate} busy, retrying on ${nextPort}`);
+          candidate = nextPort;
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    throw new Error("No available ports found");
+  };
+
+  const port = await pickPort();
+
   server.listen({
     port,
     host: "0.0.0.0",

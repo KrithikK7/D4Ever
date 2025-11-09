@@ -488,7 +488,7 @@ function SectionDialog({ section, chapters, open, onClose }: {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="songUrl">Song URL (Spotify/YouTube)</Label>
+            <Label htmlFor="songUrl">Spotify Song URL (track, album, or playlist)</Label>
             <Input
               id="songUrl"
               value={formData.songUrl}

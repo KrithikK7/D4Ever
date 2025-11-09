@@ -29,6 +29,7 @@ export default function SectionReader() {
   const [, setLocation] = useLocation();
   const { user, isAdmin } = useAuth();
   const { setCurrentSong } = useMusicPlayer();
+  const lastSongRef = useRef<string | null>(null);
   const { toast } = useToast();
   const [currentPageIndex, setCurrentPageIndex] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -497,33 +498,48 @@ export default function SectionReader() {
   // 1. Section-specific music takes priority (show toast for special moments)
   // 2. Otherwise use chapter-level playlist (background music, no toast)
   useEffect(() => {
-    // Don't change music state while data is loading
     if (isSectionLoading) return;
     if (!section) return;
-    
-    // Wait for chapter data if section belongs to a chapter
     if (section.chapterId && isChapterLoading) return;
 
-    // Priority 1: Section-specific music (special moment) - force iframe reload for fresh start
+    const targetSongUrl = section.songUrl ?? chapter?.songUrl ?? null;
+
+    if (!targetSongUrl) {
+      if (lastSongRef.current !== null) {
+        lastSongRef.current = null;
+        setCurrentSong(null, null, true);
+      }
+      return;
+    }
+
+    if (lastSongRef.current === targetSongUrl) {
+      return;
+    }
+
+    lastSongRef.current = targetSongUrl;
+
+    const targetName = section.songUrl
+      ? section.title
+      : chapter?.title || "Background Music";
+
+    setCurrentSong(targetSongUrl, targetName, true);
+
     if (section.songUrl) {
-      setCurrentSong(section.songUrl, section.title, true);
       toast({
         title: "♪ Special Music",
         description: `Now playing: ${section.title}`,
       });
-      return; // Exit early after setting music
     }
-    
-    // Priority 2: Chapter-level playlist (background music)
-    if (chapter?.songUrl) {
-      setCurrentSong(chapter.songUrl, chapter.title || "Background Music", false);
-      return; // Exit early after setting music
-    }
-    
-    // Only clear music if we're absolutely sure there's no music at either level
-    // This prevents clearing music during navigation
-    setCurrentSong(null, null, false);
-  }, [section?.id, section?.songUrl, chapter?.songUrl, isSectionLoading, isChapterLoading]);
+  }, [
+    section?.id,
+    section?.songUrl,
+    chapter?.songUrl,
+    chapter?.title,
+    isSectionLoading,
+    isChapterLoading,
+    setCurrentSong,
+    toast,
+  ]);
 
   // Load Instagram embed script when page contains Instagram content
   useEffect(() => {
@@ -1200,7 +1216,8 @@ export default function SectionReader() {
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Use the rich text toolbar to format your content, or use the media toolbar above to add videos and Spotify embeds
+                    Use the rich text toolbar for formatting, the media toolbar for images/Instagram content,
+                    and the Section Music button to update this section&apos;s Spotify soundtrack.
                   </p>
                 </div>
               ) : (

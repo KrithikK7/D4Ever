@@ -4,6 +4,7 @@ import { SVG_CONFIG, RED_STRING_PATH_D } from "./redStringPath";
 interface RedStringProgressProps {
   currentPage: number;
   totalPages: number;
+  sectionTitle?: string;
   initialProgress?: number;
   className?: string;
   /** Fill from original end -> start */
@@ -13,6 +14,7 @@ interface RedStringProgressProps {
 export function RedStringProgress({
   currentPage,
   totalPages,
+  sectionTitle,
   initialProgress = 0,
   className = "",
   reversePath = true,
@@ -154,7 +156,11 @@ export function RedStringProgress({
         aria-valuenow={Math.round(fillProgress)}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={`Reading progress: ${Math.round(fillProgress)}% complete`}
+        aria-label={
+          sectionTitle
+            ? `${sectionTitle} progress: ${Math.round(fillProgress)}% complete`
+            : `Reading progress: ${Math.round(fillProgress)}% complete`
+        }
         style={containerStyle}
       >
         <svg

@@ -343,7 +343,17 @@ export function PageManagement() {
               <MediaToolbar
                 onInsertImage={() => setIsImageDialogOpen(true)}
                 onInsertInstagram={() => setIsInstagramDialogOpen(true)}
-                onInsertSpotify={() => setIsSpotifyDialogOpen(true)}
+                onInsertSpotify={() => {
+                  if (!formData.sectionId) {
+                    toast({
+                      title: "Select a section first",
+                      description: "Pick a section before setting its Spotify music.",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  setIsSpotifyDialogOpen(true);
+                }}
               />
               <Textarea
                 ref={textareaRef}
@@ -355,7 +365,7 @@ export function PageManagement() {
                 data-testid="input-page-content"
               />
               <p className="font-noto text-xs text-muted-foreground mt-1">
-                Use the toolbar above to easily add images and videos, or write your own HTML/markdown
+                Use the toolbar above to add images or Instagram embeds. The Section Music button updates the Spotify track for the selected section.
               </p>
             </div>
           </div>

@@ -9,6 +9,7 @@ import { ChapterManagement } from "@/components/admin/ChapterManagement";
 import { ContentManagement } from "@/components/admin/ContentManagement";
 import { AnalyticsDashboard } from "@/components/admin/AnalyticsDashboard";
 import { ActivityLog } from "@/components/admin/ActivityLog";
+import { UserManagement } from "@/components/admin/UserManagement";
 
 export default function Admin() {
   const [, setLocation] = useLocation();
@@ -38,41 +39,35 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-kdrama-cream/20 to-kdrama-sky/10">
-      {/* Header */}
-      <div className="border-b bg-white/80 dark:bg-card/80 backdrop-blur-sm">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <h1 className="font-myeongjo text-2xl font-bold text-kdrama-ink dark:text-foreground">
-              Admin Panel - 紅線日記
-            </h1>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setLocation("/")}
-                data-testid="button-home"
-              >
-                <Home className="w-4 h-4 mr-2" />
-                Home
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={logout}
-                data-testid="button-logout"
-              >
-                <LogOut className="w-4 h-4 mr-2" />
-                Logout
-              </Button>
-            </div>
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="font-myeongjo text-2xl font-bold text-kdrama-ink dark:text-foreground">
+            Admin Panel - 紅線日記
+          </h1>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setLocation("/")}
+              data-testid="button-home"
+            >
+              <Home className="w-4 h-4 mr-2" />
+              Home
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={logout}
+              data-testid="button-logout"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
           </div>
         </div>
-      </div>
 
-      {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-3 mb-8">
+          <TabsList className="grid w-full max-w-2xl mx-auto grid-cols-4 mb-8">
             <TabsTrigger value="content" className="font-noto" data-testid="tab-content">
               Content Management
             </TabsTrigger>
@@ -81,6 +76,9 @@ export default function Admin() {
             </TabsTrigger>
             <TabsTrigger value="activity" className="font-noto" data-testid="tab-activity">
               Activity Log
+            </TabsTrigger>
+            <TabsTrigger value="users" className="font-noto" data-testid="tab-users">
+              Users
             </TabsTrigger>
           </TabsList>
 
@@ -111,6 +109,10 @@ export default function Admin() {
 
           <TabsContent value="activity">
             <ActivityLog />
+          </TabsContent>
+
+          <TabsContent value="users">
+            <UserManagement />
           </TabsContent>
         </Tabs>
       </div>

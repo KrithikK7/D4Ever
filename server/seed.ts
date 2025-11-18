@@ -1,5 +1,4 @@
 import './bootstrap-env';
-import { db } from './db';
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
 
@@ -7,21 +6,56 @@ async function seed() {
   try {
     console.log("Seeding database...");
 
+    const requireEnv = (name: string) => {
+      const value = process.env[name];
+      if (!value) {
+        throw new Error(`Missing required environment variable: ${name}`);
+      }
+      return value;
+    };
+
+    const requireStrongPassword = (name: string, value: string) => {
+      if (value.length < 12) {
+        throw new Error(`${name} must be at least 12 characters long`);
+      }
+      if (!/[A-Z]/.test(value) || !/[a-z]/.test(value) || !/[0-9]/.test(value)) {
+        throw new Error(`${name} must include upper, lower case letters and numbers`);
+      }
+    };
+
+    const adminUsername = requireEnv("SEED_ADMIN_USERNAME");
+    const adminPassword = requireEnv("SEED_ADMIN_PASSWORD");
+    const readerUsername = requireEnv("SEED_READER_USERNAME");
+    const readerPassword = requireEnv("SEED_READER_PASSWORD");
+
+    requireStrongPassword("SEED_ADMIN_PASSWORD", adminPassword);
+    requireStrongPassword("SEED_READER_PASSWORD", readerPassword);
+
     // Create admin user
-    const adminUser = await storage.createUser({
-      username: "admin",
-      password: await bcrypt.hash("admin123", 10),
-      role: "admin",
-    });
-    console.log("Created admin user:", adminUser.username);
+    const existingAdmin = await storage.getUserByUsername(adminUsername);
+    if (!existingAdmin) {
+      const adminUser = await storage.createUser({
+        username: adminUsername,
+        password: await bcrypt.hash(adminPassword, 10),
+        role: "admin",
+      });
+      console.log("Created admin user:", adminUser.username);
+    } else {
+      console.log("Admin user already exists, skipping creation");
+    }
 
     // Create reader user for testing
-    const readerUser = await storage.createUser({
-      username: "reader",
-      password: await bcrypt.hash("reader123", 10),
-      role: "reader",
-    });
-    console.log("Created reader user:", readerUser.username);
+    const existingReader = await storage.getUserByUsername(readerUsername);
+    if (!existingReader) {
+      const readerUser = await storage.createUser({
+        username: readerUsername,
+        password: await bcrypt.hash(readerPassword, 10),
+        role: "reader",
+      });
+      console.log("Created reader user:", readerUser.username);
+    } else {
+      console.log("Reader user already exists, skipping creation");
+    }
 
     // Create Chapter 1: Spring Destiny
     const chapter1 = await storage.createChapter({
@@ -561,13 +595,11 @@ Sometimes one image says more than a thousand words could ever express.`,
 
     console.log("Database seeded successfully!");
     console.log("\n✨ K-Drama Journal is ready to use! ✨");
-    console.log("\n📝 Login credentials:");
-    console.log("\nAdmin Account:");
-    console.log("  Username: admin");
-    console.log("  Password: admin123");
-    console.log("\nReader Account:");
-    console.log("  Username: reader");
-    console.log("  Password: reader123");
+    console.log("\n📝 Login credentials were sourced from environment variables:");
+    console.log(`  Admin username: ${adminUsername}`);
+    console.log("  Admin password: [value from SEED_ADMIN_PASSWORD]");
+    console.log(`  Reader username: ${readerUsername}`);
+    console.log("  Reader password: [value from SEED_READER_PASSWORD]");
     console.log("\n✅ Sample data includes:");
     console.log("   • 5 Chapters covering all seasons");
     console.log("   • 7 Sections with unique moods and themes");

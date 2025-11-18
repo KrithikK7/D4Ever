@@ -16,7 +16,9 @@ export default function LikedSections() {
   const { data: likedSections = [], isLoading } = useQuery<Section[]>({
     queryKey: [`/api/users/${user?.id}/liked-sections`],
     queryFn: () => user?.id 
-      ? fetch(`/api/users/${user.id}/liked-sections`).then(r => r.json()) 
+      ? fetch(`/api/users/${user.id}/liked-sections`, {
+          credentials: "include",
+        }).then(r => r.json()) 
       : Promise.resolve([]),
     enabled: !!user?.id,
   });

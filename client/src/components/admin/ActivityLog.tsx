@@ -32,7 +32,9 @@ export function ActivityLog() {
     queryKey: ["/api/analytics/activity-log", userFilter, eventTypeFilter, chapterFilter],
     queryFn: async () => {
       const url = `/api/analytics/activity-log?${queryParams.toString()}`;
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        credentials: "include",
+      });
       if (!response.ok) throw new Error("Failed to fetch activity log");
       return response.json();
     },
@@ -41,7 +43,9 @@ export function ActivityLog() {
   const { data: users = [] } = useQuery<Array<{ id: string; username: string }>>({
     queryKey: ["/api/users"],
     queryFn: async () => {
-      const response = await fetch("/api/users");
+      const response = await fetch("/api/users", {
+        credentials: "include",
+      });
       if (!response.ok) return [];
       return response.json();
     },

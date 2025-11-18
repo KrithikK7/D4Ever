@@ -925,3 +925,62 @@
   background: rgba(0, 0, 0, 0.05);
   border-radius: 8px;
 }
+
+/* Audio attachment styling */
+.audio-player .rhap_container {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.audio-player .rhap_main-controls-button {
+  width: 36px;
+  height: 36px;
+  color: rgba(71, 54, 86, 0.95);
+}
+
+.audio-player .rhap_progress-bar-show-download {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.audio-player .rhap_progress-filled {
+  background: linear-gradient(90deg, rgba(255, 188, 202, 1), rgba(167, 192, 255, 1));
+}
+
+.audio-player .rhap_progress-indicator {
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;
+  background: white;
+}
+
+.audio-player .rhap_controls-section {
+  padding: 0;
+}
+
+/* Wavesurfer progress visibility */
+.waveform [part="progress"],
+.waveform .progress {
+  mix-blend-mode: normal !important;
+  opacity: 1 !important;
+}
+
+.waveform [part="progress"] canvas,
+.waveform .progress canvas {
+  mix-blend-mode: normal !important;
+  opacity: 1 !important;
+}
+
+/* Floating background confetti for Berry/KinderJoy images */
+.falling-image {
+  will-change: transform, opacity;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.12));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .falling-image {
+    opacity: 0;
+  }
+}

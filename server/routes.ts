@@ -2,70 +2,151 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import bcrypt from "bcrypt";
 import multer from "multer";
-import path from "path";
-import { existsSync, mkdirSync } from "fs";
 import { storage } from "./storage";
-import { insertUserSchema, insertChapterSchema, insertSectionSchema, insertPageSchema, insertReadingProgressSchema, insertAnalyticsEventSchema } from "@shared/schema";
-
-// Configure multer for file uploads
-const uploadsDir = path.join(process.cwd(), "public", "uploads");
-if (!existsSync(uploadsDir)) {
-  mkdirSync(uploadsDir, { recursive: true });
-}
+import { insertUserSchema, insertChapterSchema, insertSectionSchema, insertPageSchema, insertReadingProgressSchema, insertAnalyticsEventSchema, type InsertPage, type User, type InsertUser, type Section, type Page } from "@shared/schema";
+import { requireAuth, SESSION_COOKIE_NAME, requirePermission, type UserPrivileges } from "./auth";
+import { sanitizeRichText } from "./sanitize";
+import { ensureCsrfToken, csrfProtection, loginRateLimiter } from "./security";
+import { persistUpload } from "./uploads";
+import { z } from "zod";
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      const ext = path.extname(file.originalname);
-      // Use 'media' prefix for both images and videos
-      cb(null, `media-${uniqueSuffix}${ext}`);
-    }
-  }),
+  storage: multer.memoryStorage(),
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB limit (covers both images and videos)
+    fileSize: 25 * 1024 * 1024,
   },
-  fileFilter: (req, file, cb) => {
-    // Allow both image and video files
-    const imageTypes = /jpeg|jpg|png|gif|webp/;
-    const videoTypes = /mp4|webm|mov|avi|wmv|ogg|quicktime|x-msvideo|x-ms-wmv/;
-    const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
-    
-    // Check if it's an image
-    const isImage = imageTypes.test(file.mimetype) || imageTypes.test(ext);
-    // Check if it's a video
-    const isVideo = videoTypes.test(file.mimetype) || videoTypes.test(ext) || 
-                    file.mimetype.startsWith('video/');
-    
-    if (isImage || isVideo) {
+  fileFilter: (_req, file, cb) => {
+    if (
+      file.mimetype.startsWith("image/") ||
+      file.mimetype.startsWith("audio/") ||
+      file.mimetype.startsWith("video/")
+    ) {
       return cb(null, true);
     }
-    cb(new Error('Only image and video files are allowed'));
-  }
+    cb(new Error("Only image, audio, or video files are allowed"));
+  },
 });
+
+const requireAuthenticated = requireAuth();
+const requireAdmin = requireAuth({ roles: ["admin"] });
+
+const privilegesSchema = z.object({
+  canCreateSections: z.boolean().optional(),
+  canEditSections: z.boolean().optional(),
+  canEditOwnSections: z.boolean().optional(),
+  canDeleteSections: z.boolean().optional(),
+  canDeleteOwnSections: z.boolean().optional(),
+});
+
+const createUserRequestSchema = z.object({
+  username: z.string().min(3),
+  password: z.string().min(6),
+  role: z.enum(["admin", "reader"]),
+}).merge(privilegesSchema);
+
+const updateUserRequestSchema = privilegesSchema.extend({
+  password: z.string().min(6).optional(),
+  role: z.enum(["admin", "reader"]).optional(),
+});
+
+const getUserPrivileges = (user: User): UserPrivileges => ({
+  canCreateSections: Boolean(user.canCreateSections),
+  canEditSections: Boolean(user.canEditSections),
+  canEditOwnSections: Boolean(user.canEditOwnSections),
+  canDeleteSections: Boolean(user.canDeleteSections),
+  canDeleteOwnSections: Boolean(user.canDeleteOwnSections),
+});
+
+const toUserResponse = (user: User) => ({
+  id: user.id,
+  username: user.username,
+  role: user.role,
+  privileges: getUserPrivileges(user),
+});
+
+const ownsSection = (userId: string, section?: Section | null) =>
+  Boolean(section?.createdBy && section.createdBy === userId);
+
+const ownsPage = (userId: string, page?: Page | null, section?: Section | null) =>
+  Boolean(page?.createdBy && page.createdBy === userId) || ownsSection(userId, section);
+
+const canEditSectionResource = (authUser: Express.Request["authUser"], section?: Section | null) => {
+  if (!section || !authUser) return false;
+  if (authUser.role === "admin" || authUser.privileges.canEditSections) return true;
+  if (authUser.privileges.canEditOwnSections && ownsSection(authUser.id, section)) return true;
+  return false;
+};
+
+const canDeleteSectionResource = (authUser: Express.Request["authUser"], section?: Section | null) => {
+  if (!section || !authUser) return false;
+  if (authUser.role === "admin" || authUser.privileges.canDeleteSections) return true;
+  if (authUser.privileges.canDeleteOwnSections && ownsSection(authUser.id, section)) return true;
+  return false;
+};
+
+const canEditPageResource = (
+  authUser: Express.Request["authUser"],
+  page?: Page | null,
+  section?: Section | null,
+) => {
+  if (!authUser) return false;
+  if (authUser.role === "admin" || authUser.privileges.canEditSections) return true;
+  if (authUser.privileges.canEditOwnSections && ownsPage(authUser.id, page, section)) return true;
+  return false;
+};
+
+const canDeletePageResource = (
+  authUser: Express.Request["authUser"],
+  page?: Page | null,
+  section?: Section | null,
+) => {
+  if (!authUser) return false;
+  if (authUser.role === "admin" || authUser.privileges.canDeleteSections) return true;
+  if (authUser.privileges.canDeleteOwnSections && ownsPage(authUser.id, page, section)) return true;
+  return false;
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // File upload endpoint
-  app.post("/api/upload/image", upload.single('image'), async (req, res) => {
+  app.post("/api/upload/image", requireAdmin, csrfProtection, upload.single("image"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No file uploaded" });
       }
-      
-      // Return the URL path to the uploaded file
-      const fileUrl = `/uploads/${req.file.filename}`;
-      res.json({ url: fileUrl });
+
+      const result = await persistUpload(req.file, "image");
+      res.json(result);
     } catch (error) {
       console.error("Upload error:", error);
-      res.status(500).json({ error: "Failed to upload file" });
+      const message =
+        error instanceof Error && error.message.includes("Unsupported")
+          ? "Unsupported file type"
+          : "Failed to upload file";
+      res.status(message === "Unsupported file type" ? 400 : 500).json({ error: message });
     }
   });
 
+  app.post("/api/upload/audio", requireAdmin, csrfProtection, upload.single("audio"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+
+      const result = await persistUpload(req.file, "audio");
+      res.json(result);
+    } catch (error) {
+      console.error("Audio upload error:", error);
+      const message =
+        error instanceof Error && error.message.includes("Unsupported")
+          ? "Unsupported file type"
+          : "Failed to upload audio";
+      res.status(message === "Unsupported file type" ? 400 : 500).json({ error: message });
+    }
+  });
+
+
   // Authentication routes
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
     try {
       const { username, password } = req.body;
       
@@ -85,10 +166,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
+      const privileges = getUserPrivileges(user);
+
+      await new Promise<void>((resolve, reject) => {
+        req.session.regenerate((regenerateErr) => {
+          if (regenerateErr) {
+            return reject(regenerateErr);
+          }
+          req.session.userId = user.id;
+          req.session.role = user.role === "admin" ? "admin" : "reader";
+          req.session.privileges = privileges;
+          req.session.save((saveErr) => {
+            if (saveErr) {
+              return reject(saveErr);
+            }
+            resolve();
+          });
+        });
+      });
+
+      const csrfToken = ensureCsrfToken(req);
+
       res.json({
-        id: user.id,
-        username: user.username,
-        role: user.role,
+        user: {
+          id: user.id,
+          username: user.username,
+          role: user.role,
+          privileges,
+        },
+        csrfToken,
       });
     } catch (error) {
       console.error("Login error:", error);
@@ -97,30 +203,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Session validation endpoint
-  app.post("/api/auth/validate", async (req, res) => {
+  app.get("/api/auth/validate", requireAuthenticated, async (req, res) => {
     try {
-      const { userId } = req.body;
+      const authUser = req.authUser!;
+      const storedUser = await storage.getUser(authUser.id);
       
-      if (!userId) {
-        return res.status(400).json({ error: "User ID required", invalidSession: true });
-      }
-
-      const user = await storage.getUser(userId);
-      
-      if (!user) {
+      if (!storedUser) {
+        req.session.destroy(() => undefined);
         return res.status(401).json({ 
           error: "Session expired. Please log in again.", 
           invalidSession: true 
         });
       }
 
+      const privileges = getUserPrivileges(storedUser);
+      req.session.privileges = privileges;
+      const csrfToken = ensureCsrfToken(req);
+
       res.json({
         valid: true,
         user: {
-          id: user.id,
-          username: user.username,
-          role: user.role,
-        }
+          id: storedUser.id,
+          username: storedUser.username,
+          role: storedUser.role,
+          privileges,
+        },
+        csrfToken,
       });
     } catch (error) {
       console.error("Session validation error:", error);
@@ -128,19 +236,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/auth/csrf", requireAuthenticated, async (req, res) => {
+    const csrfToken = ensureCsrfToken(req);
+    res.json({ csrfToken });
+  });
+
+  app.post("/api/auth/logout", requireAuthenticated, csrfProtection, async (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        console.error("Logout error:", err);
+        return res.status(500).json({ error: "Failed to log out" });
+      }
+
+      res.clearCookie(SESSION_COOKIE_NAME);
+      res.status(204).send();
+    });
+  });
+
   // User routes
-  app.get("/api/users", async (req, res) => {
+  app.get("/api/users", requireAdmin, async (req, res) => {
     try {
       const users = await storage.getUsers();
-      res.json(users.map((u: any) => ({ id: u.id, username: u.username, role: u.role })));
+      res.json(users.map(toUserResponse));
     } catch (error) {
       console.error("Get users error:", error);
       res.status(500).json({ error: "Failed to fetch users" });
     }
   });
 
+  app.post("/api/users", requireAdmin, csrfProtection, async (req, res) => {
+    try {
+      const data = createUserRequestSchema.parse(req.body);
+      const existing = await storage.getUserByUsername(data.username);
+      if (existing) {
+        return res.status(409).json({ error: "Username already exists" });
+      }
+
+      const hashedPassword = await bcrypt.hash(data.password, 10);
+      const user = await storage.createUser({
+        username: data.username,
+        password: hashedPassword,
+        role: data.role,
+        canCreateSections: data.canCreateSections ?? false,
+        canEditSections: data.canEditSections ?? false,
+        canEditOwnSections: data.canEditOwnSections ?? false,
+        canDeleteSections: data.canDeleteSections ?? false,
+        canDeleteOwnSections: data.canDeleteOwnSections ?? false,
+      });
+      res.status(201).json(toUserResponse(user));
+    } catch (error) {
+      console.error("Create user error:", error);
+      res.status(400).json({ error: "Failed to create user" });
+    }
+  });
+
+  app.patch("/api/users/:id", requireAdmin, csrfProtection, async (req, res) => {
+    try {
+      const payload = updateUserRequestSchema.parse(req.body);
+      const updateData: Partial<InsertUser> = {};
+
+      if (payload.role) {
+        updateData.role = payload.role;
+      }
+      if (payload.password) {
+        updateData.password = await bcrypt.hash(payload.password, 10);
+      }
+
+      if (typeof payload.canCreateSections === "boolean") {
+        updateData.canCreateSections = payload.canCreateSections;
+      }
+      if (typeof payload.canEditSections === "boolean") {
+        updateData.canEditSections = payload.canEditSections;
+      }
+      if (typeof payload.canEditOwnSections === "boolean") {
+        updateData.canEditOwnSections = payload.canEditOwnSections;
+      }
+      if (typeof payload.canDeleteSections === "boolean") {
+        updateData.canDeleteSections = payload.canDeleteSections;
+      }
+      if (typeof payload.canDeleteOwnSections === "boolean") {
+        updateData.canDeleteOwnSections = payload.canDeleteOwnSections;
+      }
+
+      if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ error: "No updates provided" });
+      }
+
+      const updated = await storage.updateUser(req.params.id, updateData);
+      if (!updated) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      if (req.session.userId === updated.id) {
+        req.session.role = updated.role === "admin" ? "admin" : "reader";
+        req.session.privileges = getUserPrivileges(updated);
+      }
+
+      res.json(toUserResponse(updated));
+    } catch (error) {
+      console.error("Update user error:", error);
+      res.status(400).json({ error: "Failed to update user" });
+    }
+  });
+
   // Chapter routes
-  app.get("/api/chapters", async (req, res) => {
+  app.get("/api/chapters", requireAuthenticated, async (req, res) => {
     try {
       const allChapters = await storage.getChapters();
       res.json(allChapters);
@@ -150,7 +350,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/chapters/:id", async (req, res) => {
+  app.get("/api/chapters/:id", requireAuthenticated, async (req, res) => {
     try {
       const chapter = await storage.getChapter(req.params.id);
       if (!chapter) {
@@ -163,7 +363,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/chapters", async (req, res) => {
+  app.post("/api/chapters", requireAdmin, csrfProtection, async (req, res) => {
     try {
       const validatedData = insertChapterSchema.parse(req.body);
       const chapter = await storage.createChapter(validatedData);
@@ -174,7 +374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/chapters/:id", async (req, res) => {
+  app.patch("/api/chapters/:id", requireAdmin, csrfProtection, async (req, res) => {
     try {
       const chapter = await storage.updateChapter(req.params.id, req.body);
       if (!chapter) {
@@ -187,7 +387,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/chapters/:id", async (req, res) => {
+  app.delete("/api/chapters/:id", requireAdmin, csrfProtection, async (req, res) => {
     try {
       await storage.deleteChapter(req.params.id);
       res.status(204).send();
@@ -198,7 +398,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Section routes
-  app.get("/api/sections", async (req, res) => {
+  app.get("/api/sections", requireAuthenticated, async (req, res) => {
     try {
       const allSections = await storage.getAllSections();
       res.json(allSections);
@@ -208,7 +408,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/chapters/:chapterId/sections", async (req, res) => {
+  app.get("/api/chapters/:chapterId/sections", requireAuthenticated, async (req, res) => {
     try {
       const allSections = await storage.getSectionsByChapter(req.params.chapterId);
       res.json(allSections);
@@ -218,7 +418,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/sections/:id", async (req, res) => {
+  app.get("/api/sections/:id", requireAuthenticated, async (req, res) => {
     try {
       const section = await storage.getSection(req.params.id);
       if (!section) {
@@ -231,13 +431,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/sections", async (req, res) => {
+  app.post("/api/sections", requireAuthenticated, requirePermission("canCreateSections"), csrfProtection, async (req, res) => {
     try {
       // Validate input data first
+      const authUser = req.authUser!;
       const validatedData = insertSectionSchema.parse(req.body);
       
       // Create section
-      const section = await storage.createSection(validatedData);
+      const section = await storage.createSection({
+        ...validatedData,
+        createdBy: authUser.id,
+      });
       
       // Create a default first page with empty content
       try {
@@ -245,6 +449,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sectionId: section.id,
           content: "",
           pageNumber: 1,
+          createdBy: authUser.id,
         });
       } catch (pageError) {
         // Rollback: Delete the section if page creation fails
@@ -272,8 +477,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Reorder route must come before :id route to prevent "reorder" being treated as an ID
-  app.patch("/api/sections/reorder", async (req, res) => {
+  app.patch("/api/sections/reorder", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
+      const authUser = req.authUser!;
       const { sectionOrders } = req.body;
       if (!Array.isArray(sectionOrders) || sectionOrders.length === 0) {
         return res.status(400).json({ error: "sectionOrders must be a non-empty array" });
@@ -287,7 +493,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "One or more sections not found" });
       }
 
-      const chapterIds = new Set(sections.map(s => s!.chapterId));
+      const concreteSections = sections.map((section) => section!);
+
+      const chapterIds = new Set(concreteSections.map(s => s.chapterId));
       if (chapterIds.size > 1) {
         return res.status(400).json({ error: "All sections must belong to the same chapter" });
       }
@@ -299,6 +507,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Order values must be unique" });
       }
 
+      const allSections = concreteSections;
+      const hasGlobalEdit = authUser.role === "admin" || authUser.privileges.canEditSections;
+      if (!hasGlobalEdit) {
+        if (!authUser.privileges.canEditOwnSections) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+        const ownsAll = allSections.every((section) => ownsSection(authUser.id, section));
+        if (!ownsAll) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+      }
+
       await storage.reorderSections(sectionOrders);
       res.status(200).json({ success: true });
     } catch (error) {
@@ -307,8 +527,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/sections/:id", async (req, res) => {
+  app.patch("/api/sections/:id", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
+      const authUser = req.authUser!;
+      const existingSection = await storage.getSection(req.params.id);
+      if (!existingSection) {
+        return res.status(404).json({ error: "Section not found" });
+      }
+      if (!canEditSectionResource(authUser, existingSection)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       // Validate input - use partial schema to allow updating only some fields
       const validatedData = insertSectionSchema.partial().parse(req.body);
 
@@ -332,8 +560,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/sections/:id", async (req, res) => {
+  app.delete("/api/sections/:id", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
+      const authUser = req.authUser!;
+      const section = await storage.getSection(req.params.id);
+      if (!section) {
+        return res.status(404).json({ error: "Section not found" });
+      }
+      if (!canDeleteSectionResource(authUser, section)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       await storage.deleteSection(req.params.id);
       res.status(204).send();
     } catch (error) {
@@ -342,13 +578,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/sections/:sectionId/progress", async (req, res) => {
+  app.get("/api/sections/:sectionId/progress", requireAuthenticated, async (req, res) => {
     try {
-      const userId = req.query.userId as string;
-      if (!userId) {
-        return res.status(400).json({ error: "User ID required" });
+      const authUser = req.authUser!;
+      const requestedUserId = req.query.userId as string | undefined;
+      if (requestedUserId && requestedUserId !== authUser.id) {
+        return res.status(403).json({ error: "Forbidden" });
       }
-      const progress = await storage.getReadingProgress(userId, req.params.sectionId);
+
+      const progress = await storage.getReadingProgress(authUser.id, req.params.sectionId);
       res.json(progress || null);
     } catch (error) {
       console.error("Get section progress error:", error);
@@ -357,7 +595,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Page routes
-  app.get("/api/pages", async (req, res) => {
+  app.get("/api/pages", requireAdmin, async (req, res) => {
     try {
       const allPages = await storage.getAllPages();
       res.json(allPages);
@@ -367,7 +605,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/sections/:sectionId/pages", async (req, res) => {
+  app.get("/api/sections/:sectionId/pages", requireAuthenticated, async (req, res) => {
     try {
       const allPages = await storage.getPagesBySection(req.params.sectionId);
       res.json(allPages);
@@ -377,7 +615,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/pages/:id", async (req, res) => {
+  app.get("/api/pages/:id", requireAdmin, async (req, res) => {
     try {
       const page = await storage.getPage(req.params.id);
       if (!page) {
@@ -390,10 +628,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/pages", async (req, res) => {
+  app.post("/api/pages", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
+      const authUser = req.authUser!;
       const validatedData = insertPageSchema.parse(req.body);
-      const page = await storage.createPage(validatedData);
+      const parentSection = await storage.getSection(validatedData.sectionId);
+      if (!parentSection) {
+        return res.status(404).json({ error: "Section not found" });
+      }
+      if (!canEditSectionResource(authUser, parentSection)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const sanitizedContent = sanitizeRichText(validatedData.content);
+      const page = await storage.createPage({
+        ...validatedData,
+        createdBy: authUser.id,
+        content: sanitizedContent,
+      });
       res.status(201).json(page);
     } catch (error) {
       console.error("Create page error:", error);
@@ -401,9 +652,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/pages/:id", async (req, res) => {
+  app.patch("/api/pages/:id", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
-      const page = await storage.updatePage(req.params.id, req.body);
+      const authUser = req.authUser!;
+      const existingPage = await storage.getPage(req.params.id);
+      if (!existingPage) {
+        return res.status(404).json({ error: "Page not found" });
+      }
+      const parentSection = await storage.getSection(existingPage.sectionId);
+      if (!canEditPageResource(authUser, existingPage, parentSection)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const updatePayload: Partial<InsertPage> = { ...req.body };
+      if (typeof updatePayload.content === "string") {
+        updatePayload.content = sanitizeRichText(updatePayload.content);
+      }
+
+      const page = await storage.updatePage(req.params.id, updatePayload);
       if (!page) {
         return res.status(404).json({ error: "Page not found" });
       }
@@ -414,8 +679,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/pages/:id", async (req, res) => {
+  app.delete("/api/pages/:id", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
+      const authUser = req.authUser!;
+      const existingPage = await storage.getPage(req.params.id);
+      if (!existingPage) {
+        return res.status(404).json({ error: "Page not found" });
+      }
+      const parentSection = await storage.getSection(existingPage.sectionId);
+      if (!canDeletePageResource(authUser, existingPage, parentSection)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
       await storage.deletePage(req.params.id);
       res.status(204).send();
     } catch (error) {
@@ -425,13 +699,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Reading progress routes
-  app.get("/api/reading-progress", async (req, res) => {
+  app.get("/api/reading-progress", requireAuthenticated, async (req, res) => {
     try {
-      const userId = req.query.userId as string;
-      if (!userId) {
-        return res.status(400).json({ error: "User ID required" });
+      const authUser = req.authUser!;
+      const requestedUserId = req.query.userId as string | undefined;
+      if (requestedUserId && requestedUserId !== authUser.id) {
+        return res.status(403).json({ error: "Forbidden" });
       }
-      const progress = await storage.getUserReadingProgress(userId);
+
+      const progress = await storage.getUserReadingProgress(authUser.id);
       res.json(progress);
     } catch (error) {
       console.error("Get reading progress error:", error);
@@ -439,13 +715,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/reading-progress/last", async (req, res) => {
+  app.get("/api/reading-progress/last", requireAuthenticated, async (req, res) => {
     try {
-      const userId = req.query.userId as string;
-      if (!userId) {
-        return res.status(400).json({ error: "User ID required" });
+      const authUser = req.authUser!;
+      const requestedUserId = req.query.userId as string | undefined;
+      if (requestedUserId && requestedUserId !== authUser.id) {
+        return res.status(403).json({ error: "Forbidden" });
       }
-      const progress = await storage.getLastReadSection(userId);
+
+      const progress = await storage.getLastReadSection(authUser.id);
       res.json(progress || null);
     } catch (error) {
       console.error("Get last read error:", error);
@@ -453,12 +731,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/reading-progress", async (req, res) => {
+  app.post("/api/reading-progress", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
-      const validatedData = insertReadingProgressSchema.parse(req.body);
+      const authUser = req.authUser!;
+      const validatedData = insertReadingProgressSchema.parse({
+        ...req.body,
+        userId: authUser.id,
+      });
       
       // Validate that user exists
-      const user = await storage.getUser(validatedData.userId);
+      const user = await storage.getUser(authUser.id);
       if (!user) {
         return res.status(401).json({ 
           error: "Your session has expired. Please log in again.", 
@@ -483,13 +765,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/chapters/:chapterId/progress", async (req, res) => {
+  app.get("/api/chapters/:chapterId/progress", requireAuthenticated, async (req, res) => {
     try {
-      const userId = req.query.userId as string;
-      if (!userId) {
-        return res.status(400).json({ error: "User ID required" });
+      const authUser = req.authUser!;
+      const requestedUserId = req.query.userId as string | undefined;
+      if (requestedUserId && requestedUserId !== authUser.id) {
+        return res.status(403).json({ error: "Forbidden" });
       }
-      const progress = await storage.getChapterProgress(userId, req.params.chapterId);
+
+      const progress = await storage.getChapterProgress(authUser.id, req.params.chapterId);
       res.json(progress);
     } catch (error) {
       console.error("Get chapter progress error:", error);
@@ -498,15 +782,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Liked sections routes
-  app.post("/api/sections/:sectionId/like", async (req, res) => {
+  app.post("/api/sections/:sectionId/like", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
-      const { userId } = req.body;
-      if (!userId) {
-        return res.status(400).json({ error: "User ID required" });
-      }
+      const authUser = req.authUser!;
       
       // Validate that user exists
-      const user = await storage.getUser(userId);
+      const user = await storage.getUser(authUser.id);
       if (!user) {
         return res.status(401).json({ 
           error: "Your session has expired. Please log in again.", 
@@ -514,7 +795,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      const liked = await storage.likeSection(userId, req.params.sectionId);
+      const liked = await storage.likeSection(authUser.id, req.params.sectionId);
       res.json(liked);
     } catch (error: any) {
       console.error("Like section error:", error);
@@ -531,15 +812,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/sections/:sectionId/like", async (req, res) => {
+  app.delete("/api/sections/:sectionId/like", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
-      const userId = req.query.userId as string;
-      if (!userId) {
-        return res.status(400).json({ error: "User ID required" });
-      }
+      const authUser = req.authUser!;
       
       // Validate that user exists
-      const user = await storage.getUser(userId);
+      const user = await storage.getUser(authUser.id);
       if (!user) {
         return res.status(401).json({ 
           error: "Your session has expired. Please log in again.", 
@@ -547,7 +825,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      await storage.unlikeSection(userId, req.params.sectionId);
+      await storage.unlikeSection(authUser.id, req.params.sectionId);
       res.status(204).send();
     } catch (error: any) {
       console.error("Unlike section error:", error);
@@ -564,8 +842,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users/:userId/progress", async (req, res) => {
+  app.get("/api/users/:userId/progress", requireAuthenticated, async (req, res) => {
     try {
+      const authUser = req.authUser!;
+      if (authUser.role !== "admin" && authUser.id !== req.params.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
       const progress = await storage.getUserReadingProgress(req.params.userId);
       res.json(progress);
     } catch (error) {
@@ -574,8 +857,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/users/:userId/liked-sections", async (req, res) => {
+  app.get("/api/users/:userId/liked-sections", requireAuthenticated, async (req, res) => {
     try {
+      const authUser = req.authUser!;
+      if (authUser.role !== "admin" && authUser.id !== req.params.userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
       const sections = await storage.getLikedSectionsByUser(req.params.userId);
       res.json(sections);
     } catch (error) {
@@ -584,13 +872,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/sections/:sectionId/like-status", async (req, res) => {
+  app.get("/api/sections/:sectionId/like-status", requireAuthenticated, async (req, res) => {
     try {
-      const userId = req.query.userId as string;
-      if (!userId) {
-        return res.status(400).json({ error: "User ID required" });
+      const authUser = req.authUser!;
+      const requestedUserId = req.query.userId as string | undefined;
+      if (requestedUserId && requestedUserId !== authUser.id) {
+        return res.status(403).json({ error: "Forbidden" });
       }
-      const isLiked = await storage.isLikedByUser(userId, req.params.sectionId);
+
+      const isLiked = await storage.isLikedByUser(authUser.id, req.params.sectionId);
       res.json({ isLiked });
     } catch (error) {
       console.error("Get like status error:", error);
@@ -598,7 +888,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/sections/:sectionId/like-count", async (req, res) => {
+  app.get("/api/sections/:sectionId/like-count", requireAuthenticated, async (req, res) => {
     try {
       const count = await storage.getLikedSectionsCount(req.params.sectionId);
       res.json({ count });
@@ -609,9 +899,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Analytics routes
-  app.post("/api/analytics", async (req, res) => {
+  app.post("/api/analytics", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
-      const validatedData = insertAnalyticsEventSchema.parse(req.body);
+      const authUser = req.authUser!;
+      const validatedData = insertAnalyticsEventSchema.parse({
+        ...req.body,
+        userId: authUser.id,
+      });
       const event = await storage.createAnalyticsEvent(validatedData);
       res.status(201).json(event);
     } catch (error) {
@@ -620,7 +914,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/analytics/summary", async (req, res) => {
+  app.get("/api/analytics/summary", requireAdmin, async (req, res) => {
     try {
       const summary = await storage.getAnalyticsSummary();
       res.json(summary);
@@ -630,7 +924,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/analytics/user/:userId", async (req, res) => {
+  app.get("/api/analytics/user/:userId", requireAdmin, async (req, res) => {
     try {
       const events = await storage.getAnalyticsByUser(req.params.userId);
       res.json(events);
@@ -640,7 +934,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/analytics/chapter/:chapterId", async (req, res) => {
+  app.get("/api/analytics/chapter/:chapterId", requireAdmin, async (req, res) => {
     try {
       const events = await storage.getAnalyticsByChapter(req.params.chapterId);
       res.json(events);
@@ -650,7 +944,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/analytics/dashboard", async (req, res) => {
+  app.get("/api/analytics/dashboard", requireAdmin, async (req, res) => {
     try {
       const dashboardData = await storage.getAnalyticsDashboard();
       res.json(dashboardData);
@@ -660,7 +954,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/analytics/activity-log", async (req, res) => {
+  app.get("/api/analytics/activity-log", requireAdmin, async (req, res) => {
     try {
       const filters = {
         userId: req.query.userId as string | undefined,

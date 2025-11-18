@@ -1,13 +1,26 @@
-import { useQuery, useQueries } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueries } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Book, LogIn, LogOut, Play, CheckCircle2, PlayCircle, Heart } from "lucide-react";
+import { Book, LogIn, LogOut, Play, CheckCircle2, PlayCircle, Heart, Plus } from "lucide-react";
 import { Knot } from "@/components/Knot";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Chapter, ReadingProgress, Section } from "@shared/schema";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface ChapterProgress {
   completed: boolean;
@@ -19,6 +32,15 @@ interface ChapterProgress {
 export default function Home() {
   const [, setLocation] = useLocation();
   const { user, logout, isAuthenticated } = useAuth();
+  const { toast } = useToast();
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [chapterForm, setChapterForm] = useState({
+    title: "",
+    description: "",
+    coverImage: "",
+    songUrl: "",
+    order: "1",
+  });
 
   const { data: chapters = [] } = useQuery<Chapter[]>({
     queryKey: ["/api/chapters"],
@@ -31,9 +53,12 @@ export default function Home() {
 
   const { data: likedSections = [] } = useQuery<Section[]>({
     queryKey: [`/api/users/${user?.id}/liked-sections`],
-    queryFn: () => user?.id 
-      ? fetch(`/api/users/${user.id}/liked-sections`).then(r => r.json()) 
-      : Promise.resolve([]),
+    queryFn: () =>
+      user?.id
+        ? fetch(`/api/users/${user.id}/liked-sections`, {
+            credentials: "include",
+          }).then(r => r.json())
+        : Promise.resolve([]),
     enabled: !!user?.id,
   });
 
@@ -70,8 +95,68 @@ export default function Home() {
     }
   };
 
+  const resetChapterForm = () => {
+    setChapterForm({
+      title: "",
+      description: "",
+      coverImage: "",
+      songUrl: "",
+      order: (chapters.length + 1).toString(),
+    });
+  };
+
+  const openCreateDialog = () => {
+    resetChapterForm();
+    setIsCreateOpen(true);
+  };
+
+  const createChapterMutation = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        title: chapterForm.title.trim(),
+        description: chapterForm.description.trim() || null,
+        coverImage: chapterForm.coverImage.trim() || null,
+        songUrl: chapterForm.songUrl.trim() || null,
+        order: Number.isNaN(parseInt(chapterForm.order, 10))
+          ? chapters.length + 1
+          : parseInt(chapterForm.order, 10),
+      };
+      const response = await apiRequest("POST", "/api/chapters", payload);
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/chapters"] });
+      setIsCreateOpen(false);
+      resetChapterForm();
+      toast({
+        title: "Chapter created",
+        description: "Your new chapter is ready.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Failed to create chapter",
+        description: "Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleCreateChapter = () => {
+    if (!chapterForm.title.trim()) {
+      toast({
+        title: "Title required",
+        description: "Please enter a chapter title.",
+        variant: "destructive",
+      });
+      return;
+    }
+    createChapterMutation.mutate();
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-b from-kdrama-cream/40 via-kdrama-sakura/20 to-kdrama-lavender/20">
+    <>
+      <div className="min-h-screen bg-gradient-to-b from-kdrama-cream/40 via-kdrama-sakura/20 to-kdrama-lavender/20">
       <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-kdrama-thread via-kdrama-sakura to-kdrama-lavender" />
       
       <div className="container mx-auto px-4 py-12">
@@ -145,9 +230,25 @@ export default function Home() {
             <h2 className="font-myeongjo text-3xl font-bold text-kdrama-ink dark:text-foreground">
               Chapters
             </h2>
-            <Badge variant="secondary" className="font-noto bg-[#c4c4c442] text-[#2d2a32]">
-              {chapters.length} {chapters.length === 1 ? "Chapter" : "Chapters"}
-            </Badge>
+            <div className="flex items-center gap-3">
+              <Badge
+                variant="secondary"
+                className="font-noto border border-kdrama-thread/40 bg-kdrama-thread/20 text-white"
+              >
+                {chapters.length} {chapters.length === 1 ? "Chapter" : "Chapters"}
+              </Badge>
+              {user?.role === "admin" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={openCreateDialog}
+                  data-testid="button-create-chapter-home"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  New Chapter
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -258,5 +359,77 @@ export default function Home() {
         </div>
       </div>
     </div>
+      {user?.role === "admin" && (
+        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Create Chapter</DialogTitle>
+              <DialogDescription>Add a new chapter to the journal.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="chapter-title">Title</Label>
+                <Input
+                  id="chapter-title"
+                  value={chapterForm.title}
+                  onChange={(e) => setChapterForm((prev) => ({ ...prev, title: e.target.value }))}
+                  placeholder="Spring Destiny"
+                />
+              </div>
+              <div>
+                <Label htmlFor="chapter-description">Description</Label>
+                <Textarea
+                  id="chapter-description"
+                  value={chapterForm.description}
+                  onChange={(e) => setChapterForm((prev) => ({ ...prev, description: e.target.value }))}
+                  placeholder="Optional description for this chapter"
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="chapter-cover">Cover Image URL</Label>
+                  <Input
+                    id="chapter-cover"
+                    value={chapterForm.coverImage}
+                    onChange={(e) => setChapterForm((prev) => ({ ...prev, coverImage: e.target.value }))}
+                    placeholder="https://..."
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="chapter-song">Theme Song URL</Label>
+                  <Input
+                    id="chapter-song"
+                    value={chapterForm.songUrl}
+                    onChange={(e) => setChapterForm((prev) => ({ ...prev, songUrl: e.target.value }))}
+                    placeholder="Spotify track URL"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="chapter-order">Order</Label>
+                <Input
+                  id="chapter-order"
+                  type="number"
+                  min="0"
+                  value={chapterForm.order}
+                  onChange={(e) => setChapterForm((prev) => ({ ...prev, order: e.target.value }))}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setIsCreateOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateChapter}
+                disabled={createChapterMutation.isPending}
+              >
+                {createChapterMutation.isPending ? "Creating..." : "Create Chapter"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }

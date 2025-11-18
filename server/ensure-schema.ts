@@ -26,4 +26,39 @@ export async function ensureSchemaColumns() {
     `ALTER TABLE "pages" ADD COLUMN IF NOT EXISTS "updated_at" TIMESTAMPTZ NOT NULL DEFAULT now()`,
     "pages.updated_at",
   );
+
+  await addColumnIfMissing(
+    `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "can_create_sections" boolean NOT NULL DEFAULT false`,
+    "users.can_create_sections",
+  );
+
+  await addColumnIfMissing(
+    `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "can_edit_sections" boolean NOT NULL DEFAULT false`,
+    "users.can_edit_sections",
+  );
+
+  await addColumnIfMissing(
+    `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "can_edit_own_sections" boolean NOT NULL DEFAULT false`,
+    "users.can_edit_own_sections",
+  );
+
+  await addColumnIfMissing(
+    `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "can_delete_sections" boolean NOT NULL DEFAULT false`,
+    "users.can_delete_sections",
+  );
+
+  await addColumnIfMissing(
+    `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "can_delete_own_sections" boolean NOT NULL DEFAULT false`,
+    "users.can_delete_own_sections",
+  );
+
+  await addColumnIfMissing(
+    `ALTER TABLE "sections" ADD COLUMN IF NOT EXISTS "created_by" varchar REFERENCES "users"("id") ON DELETE SET NULL`,
+    "sections.created_by",
+  );
+
+  await addColumnIfMissing(
+    `ALTER TABLE "pages" ADD COLUMN IF NOT EXISTS "created_by" varchar REFERENCES "users"("id") ON DELETE SET NULL`,
+    "pages.created_by",
+  );
 }

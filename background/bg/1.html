@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Gradient → PNG</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --w: 1920; --h: 1080; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; padding: 24px; }
+    button { padding: 10px 16px; border-radius: 8px; border: 1px solid #ddd; cursor: pointer; }
+    .row { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+    input { width: 110px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
+    .preview-wrap { width: 100%; max-width: 900px; aspect-ratio: 16/9; border-radius: 12px; overflow: hidden; border: 1px solid #eee; box-shadow: 0 4px 18px rgba(0,0,0,.06); }
+    #preview { width: 100%; height: 100%; background-repeat: no-repeat; background-size: 100% 100%; background-position: center; }
+    /* Off-viewport but VISIBLE so html2canvas can render it */
+    #capture {
+      position: absolute; left: -99999px; top: -99999px;
+      width: calc(var(--w) * 1px); height: calc(var(--h) * 1px);
+      background-repeat: no-repeat; background-size: 100% 100%; background-position: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Gradient → PNG</h1>
+
+  <div class="row">
+    <label>Width <input id="w" type="number" min="16" value="1920"></label>
+    <label>Height <input id="h" type="number" min="16" value="1080"></label>
+    <button id="btn">Download PNG</button>
+  </div>
+
+  <div class="preview-wrap">
+    <div id="preview"></div>
+  </div>
+
+  <!-- Off-viewport capture target -->
+  <div id="capture" aria-hidden="true"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script>
+    const gradientLayers = [
+      "linear-gradient(180deg, rgba(255,250,242,0.95) 0%, rgba(255,214,229,0.82) 45%, rgba(225,211,255,0.85) 100%)",
+      "radial-gradient(circle at 10% 15%, rgba(255,204,233,0.4), transparent 45%)",
+      "radial-gradient(circle at 70% 15%, rgba(181,205,255,0.35), transparent 40%)",
+      "radial-gradient(circle at 35% 75%, rgba(255,235,202,0.28), transparent 45%)",
+    ];
+
+    const preview = document.getElementById('preview');
+    const capture = document.getElementById('capture');
+    const wInput = document.getElementById('w');
+    const hInput = document.getElementById('h');
+
+    function applyGradients(el) {
+      el.style.backgroundImage = gradientLayers.join(',');
+    }
+
+    function applySizes() {
+      const w = Math.max(16, parseInt(wInput.value || '1920', 10));
+      const h = Math.max(16, parseInt(hInput.value || '1080', 10));
+      document.documentElement.style.setProperty('--w', w);
+      document.documentElement.style.setProperty('--h', h);
+      capture.style.width = w + 'px';
+      capture.style.height = h + 'px';
+    }
+
+    async function downloadPNG() {
+      applySizes();
+      applyGradients(capture);
+
+      // Render at 1:1 scale to get exact pixel size
+      const w = parseInt(getComputedStyle(capture).width, 10);
+      const h = parseInt(getComputedStyle(capture).height, 10);
+
+      const canvas = await html2canvas(capture, {
+        backgroundColor: null,
+        width: w,
+        height: h,
+        scale: 1,
+        useCORS: true
+      });
+
+      if (canvas.toBlob) {
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `gradient_${w}x${h}.png`;
+          document.body.appendChild(a);
+          a.click();
+          URL.revokeObjectURL(a.href);
+          a.remove();
+        });
+      } else {
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/png');
+        a.download = `gradient_${w}x${h}.png`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    }
+
+    // Init preview and capture element
+    applyGradients(preview);
+    applySizes();
+
+    // Keep preview updated on size change
+    wInput.addEventListener('input', applySizes);
+    hInput.addEventListener('input', applySizes);
+
+    document.getElementById('btn').addEventListener('click', () => {
+      downloadPNG().catch(err => {
+        console.error(err);
+        alert('Failed to render. Check console for details.');
+      });
+    });
+  </script>
+</body>
+</html>

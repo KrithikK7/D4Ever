@@ -8,6 +8,8 @@ import { MusicPlayerProvider } from "@/contexts/MusicPlayerContext";
 import { FloatingMusicPlayer } from "@/components/FloatingMusicPlayer";
 import { AutoplayConsentProvider } from "@/contexts/AutoplayConsentContext";
 import { PrivateRoute } from "@/components/PrivateRoute";
+import { FallingImagesBackground } from "@/components/FallingImagesBackground";
+import { GlobalGradientBackdrop } from "@/components/GlobalGradientBackdrop";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import Login from "@/pages/Login";
@@ -41,6 +43,8 @@ function App() {
         <MusicPlayerProvider>
           <AutoplayConsentProvider>
             <TooltipProvider>
+              <GlobalGradientBackdrop />
+              <FallingImagesBackground />
               <Toaster />
               <FloatingMusicPlayer />
               <Router />

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { CSRF_STORAGE_KEY } from "@/lib/authStorage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,10 +30,11 @@ import type { Section } from "@shared/schema";
 interface MediaToolbarProps {
   onInsertImage: () => void;
   onInsertInstagram: () => void;
+  onInsertAudio?: () => void;
   onInsertSpotify?: () => void;
 }
 
-export function MediaToolbar({ onInsertImage, onInsertInstagram, onInsertSpotify }: MediaToolbarProps) {
+export function MediaToolbar({ onInsertImage, onInsertInstagram, onInsertAudio, onInsertSpotify }: MediaToolbarProps) {
   return (
     <div className="flex items-center gap-2 p-2 border rounded-md bg-muted/30 mb-2 flex-wrap">
       <span className="text-xs font-noto text-muted-foreground mr-2">Insert:</span>
@@ -56,6 +58,18 @@ export function MediaToolbar({ onInsertImage, onInsertInstagram, onInsertSpotify
         <SiInstagram className="w-4 h-4 mr-1" />
         Instagram
       </Button>
+      {onInsertAudio && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onInsertAudio}
+          data-testid="button-insert-audio"
+        >
+          <Music className="w-4 h-4 mr-1" />
+          Audio
+        </Button>
+      )}
       {onInsertSpotify && (
         <Button
           type="button"
@@ -150,10 +164,17 @@ export function ImageEmbedDialog({ open, onOpenChange, onInsert }: ImageEmbedDia
     formData.append('image', file);
     
     try {
+      const csrfToken = localStorage.getItem(CSRF_STORAGE_KEY);
+      const headers: HeadersInit = {};
+      if (csrfToken) {
+        headers["X-CSRF-Token"] = csrfToken;
+      }
+
       const response = await fetch('/api/upload/image', {
         method: 'POST',
         body: formData,
         credentials: 'include',
+        headers,
       });
       
       if (!response.ok) {
@@ -464,6 +485,147 @@ https://instagram.com/reel/DEF456/"
     </Dialog>
   );
 }
+
+interface AudioEmbedDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onInsert: (embed: string) => void;
+}
+
+export function AudioEmbedDialog({ open, onOpenChange, onInsert }: AudioEmbedDialogProps) {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [audioTitle, setAudioTitle] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("audio/")) {
+      toast({
+        title: "Invalid file",
+        description: "Please select an audio file (mp3, wav, m4a, ogg, aac).",
+        variant: "destructive",
+      });
+      return;
+    }
+    const maxSize = 30 * 1024 * 1024;
+    if (file.size > maxSize) {
+      toast({
+        title: "File too large",
+        description: "Audio files must be smaller than 30MB.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSelectedFile(file);
+    setAudioTitle(file.name.replace(/\.[^/.]+$/, ""));
+  };
+
+  const handleInsert = async () => {
+    if (!selectedFile) {
+      toast({
+        title: "No audio selected",
+        description: "Please choose an audio file to upload.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("audio", selectedFile);
+
+      const csrfToken = localStorage.getItem(CSRF_STORAGE_KEY);
+      const headers: HeadersInit = {};
+      if (csrfToken) {
+        headers["X-CSRF-Token"] = csrfToken;
+      }
+
+      const response = await fetch("/api/upload/audio", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+        headers,
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: "Upload failed" }));
+        throw new Error(error.error || "Upload failed");
+      }
+
+      const data = await response.json();
+      const embed = `[audio:${data.url}${audioTitle.trim() ? `|${audioTitle.trim()}` : ""}]`;
+      onInsert(embed);
+      setSelectedFile(null);
+      setAudioTitle("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      onOpenChange(false);
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Failed to upload audio.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleClose = () => {
+    setSelectedFile(null);
+    setAudioTitle("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-myeongjo">Upload Audio</DialogTitle>
+          <DialogDescription className="font-noto">
+            Select an MP3 or other audio file to embed as an inline player.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div>
+            <Label className="font-noto text-sm font-medium">
+              Audio file <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              type="file"
+              accept="audio/*"
+              onChange={handleFileChange}
+              ref={fileInputRef}
+              data-testid="input-audio-file"
+            />
+          </div>
+          <div>
+            <Label className="font-noto text-sm font-medium">Display title (optional)</Label>
+            <Input
+              value={audioTitle}
+              onChange={(e) => setAudioTitle(e.target.value)}
+              placeholder="Audio title"
+              data-testid="input-audio-title"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={handleClose} data-testid="button-cancel-audio" disabled={isUploading}>
+            Cancel
+          </Button>
+          <Button onClick={handleInsert} data-testid="button-insert-audio-dialog" disabled={isUploading}>
+            {isUploading ? "Uploading..." : "Insert Audio"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 
 interface SpotifyEmbedDialogProps {
   open: boolean;

@@ -8,11 +8,24 @@ export const users = pgTable("users", {
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
   role: text("role").notNull().default("reader"),
+  canCreateSections: boolean("can_create_sections").notNull().default(false),
+  canEditSections: boolean("can_edit_sections").notNull().default(false),
+  canEditOwnSections: boolean("can_edit_own_sections").notNull().default(false),
+  canDeleteSections: boolean("can_delete_sections").notNull().default(false),
+  canDeleteOwnSections: boolean("can_delete_own_sections").notNull().default(false),
 });
 
-export const insertUserSchema = createInsertSchema(users).omit({
-  id: true,
-});
+export const insertUserSchema = createInsertSchema(users)
+  .omit({
+    id: true,
+  })
+  .extend({
+    canCreateSections: z.boolean().optional(),
+    canEditSections: z.boolean().optional(),
+    canEditOwnSections: z.boolean().optional(),
+    canDeleteSections: z.boolean().optional(),
+    canDeleteOwnSections: z.boolean().optional(),
+  });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -37,6 +50,7 @@ export const sections = pgTable("sections", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   chapterId: varchar("chapter_id").notNull().references(() => chapters.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
   mood: text("mood").array(),
   tags: text("tags").array(),
   thumbnail: text("thumbnail"),
@@ -51,6 +65,7 @@ export const insertSectionSchema = createInsertSchema(sections)
     id: true,
   })
   .extend({
+    createdBy: z.string().optional(),
     mood: z.array(z.string()).optional(),
     tags: z.array(z.string()).optional(),
     publishedAt: z.coerce.date().optional(),
@@ -64,6 +79,7 @@ export const pages = pgTable("pages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   sectionId: varchar("section_id").notNull().references(() => sections.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
+  createdBy: varchar("created_by").references(() => users.id, { onDelete: "set null" }),
   pageNumber: integer("page_number").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -71,6 +87,8 @@ export const pages = pgTable("pages", {
 export const insertPageSchema = createInsertSchema(pages).omit({
   id: true,
   updatedAt: true,
+}).extend({
+  createdBy: z.string().optional(),
 });
 
 export type InsertPage = z.infer<typeof insertPageSchema>;

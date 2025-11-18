@@ -34,7 +34,7 @@ import { Plus, Edit, Trash2, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Page, Section } from "@shared/schema";
-import { MediaToolbar, ImageEmbedDialog, InstagramEmbedDialog, SpotifyEmbedDialog } from "./MediaEmbedDialogs";
+import { MediaToolbar, ImageEmbedDialog, InstagramEmbedDialog, SpotifyEmbedDialog, AudioEmbedDialog } from "./MediaEmbedDialogs";
 
 export function PageManagement() {
   const { toast } = useToast();
@@ -43,6 +43,7 @@ export function PageManagement() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isImageDialogOpen, setIsImageDialogOpen] = useState(false);
   const [isInstagramDialogOpen, setIsInstagramDialogOpen] = useState(false);
+  const [isAudioDialogOpen, setIsAudioDialogOpen] = useState(false);
   const [isSpotifyDialogOpen, setIsSpotifyDialogOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [formData, setFormData] = useState({
@@ -343,6 +344,7 @@ export function PageManagement() {
               <MediaToolbar
                 onInsertImage={() => setIsImageDialogOpen(true)}
                 onInsertInstagram={() => setIsInstagramDialogOpen(true)}
+                onInsertAudio={() => setIsAudioDialogOpen(true)}
                 onInsertSpotify={() => {
                   if (!formData.sectionId) {
                     toast({
@@ -424,6 +426,11 @@ export function PageManagement() {
       <InstagramEmbedDialog
         open={isInstagramDialogOpen}
         onOpenChange={setIsInstagramDialogOpen}
+        onInsert={insertContent}
+      />
+      <AudioEmbedDialog
+        open={isAudioDialogOpen}
+        onOpenChange={setIsAudioDialogOpen}
         onInsert={insertContent}
       />
       <SpotifyEmbedDialog

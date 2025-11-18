@@ -1,11 +1,34 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useRef, useCallback } from "react";
+import { USER_STORAGE_KEY, CSRF_STORAGE_KEY, clearStoredAuth } from "@/lib/authStorage";
 
 export type UserRole = "admin" | "reader";
+
+export type UserPrivileges = {
+  canCreateSections: boolean;
+  canEditSections: boolean;
+  canEditOwnSections: boolean;
+  canDeleteSections: boolean;
+  canDeleteOwnSections: boolean;
+};
+
+const defaultPrivileges: UserPrivileges = {
+  canCreateSections: false,
+  canEditSections: false,
+  canEditOwnSections: false,
+  canDeleteSections: false,
+  canDeleteOwnSections: false,
+};
+
+const normalizePrivileges = (privileges?: Partial<UserPrivileges> | null): UserPrivileges => ({
+  ...defaultPrivileges,
+  ...(privileges ?? {}),
+});
 
 interface AuthUser {
   id: string;
   username: string;
   role: UserRole;
+  privileges: UserPrivileges;
 }
 
 interface AuthContextType {
@@ -14,6 +37,7 @@ interface AuthContextType {
   logout: () => void;
   isAdmin: boolean;
   isAuthenticated: boolean;
+  hasPermission: (permission: keyof UserPrivileges) => boolean;
   validateSession: () => Promise<void>;
 }
 
@@ -24,36 +48,58 @@ const INACTIVITY_TIMEOUT = 15 * 60 * 1000; // 15 minutes in milliseconds
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isValidating, setIsValidating] = useState(true);
+  const [csrfToken, setCsrfToken] = useState<string | null>(null);
   const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const mapUserFromResponse = useCallback((rawUser: any | null): AuthUser | null => {
+    if (!rawUser) {
+      return null;
+    }
+    return {
+      id: rawUser.id,
+      username: rawUser.username,
+      role: rawUser.role,
+      privileges: normalizePrivileges(rawUser.privileges),
+    };
+  }, []);
+
   const logout = useCallback(() => {
+    const storedToken = localStorage.getItem(CSRF_STORAGE_KEY);
     if (inactivityTimerRef.current) {
       clearTimeout(inactivityTimerRef.current);
       inactivityTimerRef.current = null;
     }
     setUser(null);
-    localStorage.removeItem("kdrama-journal-user");
+    setCsrfToken(null);
+    clearStoredAuth();
+    const headers: Record<string, string> = {};
+    if (storedToken) {
+      headers["X-CSRF-Token"] = storedToken;
+    }
+    void fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "include",
+      headers,
+    }).catch(() => undefined);
   }, []);
 
   const validateSession = useCallback(async () => {
-    const storedUser = localStorage.getItem("kdrama-journal-user");
-    if (!storedUser) {
-      setIsValidating(false);
-      return;
-    }
-
     try {
-      const parsedUser = JSON.parse(storedUser);
       const response = await fetch("/api/auth/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: parsedUser.id }),
+        method: "GET",
+        credentials: "include",
       });
 
       if (response.ok) {
         const data = await response.json();
         if (data.valid) {
-          setUser(data.user);
+          const mappedUser = mapUserFromResponse(data.user);
+          setUser(mappedUser);
+          setCsrfToken(data.csrfToken || null);
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(mappedUser));
+          if (data.csrfToken) {
+            localStorage.setItem(CSRF_STORAGE_KEY, data.csrfToken);
+          }
         } else {
           logout();
         }
@@ -69,11 +115,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsValidating(false);
     }
-  }, [logout]);
+  }, [logout, mapUserFromResponse]);
 
   useEffect(() => {
     validateSession();
-  }, []);
+  }, [validateSession]);
 
   const resetInactivityTimer = useCallback(() => {
     if (!user) return;
@@ -116,14 +162,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
       });
 
       if (response.ok) {
-        const authUser = await response.json();
-        setUser(authUser);
-        localStorage.setItem("kdrama-journal-user", JSON.stringify(authUser));
+        const authResponse = await response.json();
+        const mappedUser = mapUserFromResponse(authResponse.user);
+        setUser(mappedUser);
+        setCsrfToken(authResponse.csrfToken || null);
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(mappedUser));
+        if (authResponse.csrfToken) {
+          localStorage.setItem(CSRF_STORAGE_KEY, authResponse.csrfToken);
+        }
         return true;
       }
       return false;
@@ -133,6 +185,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const hasPermission = useCallback(
+    (permission: keyof UserPrivileges) => {
+      if (!user) return false;
+      if (user.role === "admin") return true;
+      return user.privileges[permission];
+    },
+    [user],
+  );
+
   return (
     <AuthContext.Provider
       value={{
@@ -141,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         isAdmin: user?.role === "admin",
         isAuthenticated: Boolean(user),
+        hasPermission,
         validateSession,
       }}
     >

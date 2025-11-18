@@ -1,27 +1,56 @@
 import './bootstrap-env';
-import { db } from './db';
 import express, { type Request, Response, NextFunction } from "express";
+import helmet from "helmet";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { ensureSchemaColumns } from "./ensure-schema";
 import { createServer as createNetServer } from "net";
+import { createSessionMiddleware } from "./auth";
+import { apiRateLimiter } from "./security";
+import { createUploadsRouter } from "./uploads";
 
 const app = express();
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
 
 declare module 'http' {
   interface IncomingMessage {
     rawBody: unknown
   }
 }
+const isProduction = app.get("env") === "production";
+
+app.use(helmet({
+  contentSecurityPolicy: isProduction
+    ? {
+        useDefaults: true,
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", "https://www.youtube.com", "https://player.vimeo.com"],
+          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com"],
+          mediaSrc: ["'self'", "data:", "blob:", "https://*.scdn.co", "https://*.spotifycdn.com", "https://open.spotify.com"],
+          fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+          connectSrc: ["'self'", "https://graph.instagram.com", "https://www.instagram.com", "https://open.spotify.com"],
+          frameSrc: ["'self'", "https://www.youtube.com", "https://player.vimeo.com", "https://www.instagram.com", "https://open.spotify.com"],
+        },
+      }
+    : false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+  referrerPolicy: { policy: "no-referrer" },
+}));
 app.use(express.json({
+  limit: "1mb",
   verify: (req, _res, buf) => {
     req.rawBody = buf;
   }
 }));
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: false, limit: "1mb" }));
+app.use(createSessionMiddleware());
+app.use("/api", apiRateLimiter);
 
-// Serve uploaded files from public/uploads directory
-app.use('/uploads', express.static('public/uploads'));
+app.use("/uploads", createUploadsRouter());
 
 app.use((req, res, next) => {
   const start = Date.now();

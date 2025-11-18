@@ -1,4 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { CSRF_STORAGE_KEY, USER_STORAGE_KEY, clearStoredAuth } from "./authStorage";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -7,8 +8,7 @@ async function throwIfResNotOk(res: Response) {
       
       // Check if this is an invalid session error
       if (errorData.invalidSession) {
-        // Clear the stored user data
-        localStorage.removeItem("kdrama-journal-user");
+        clearStoredAuth();
         // Redirect to login page
         window.location.href = "/";
       }
@@ -27,9 +27,20 @@ export async function apiRequest(
   url: string,
   data?: unknown | undefined,
 ): Promise<Response> {
+  const headers: Record<string, string> = {};
+  if (data) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  const csrfToken = localStorage.getItem(CSRF_STORAGE_KEY);
+  const safeMethod = ["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
+  if (csrfToken && !safeMethod) {
+    headers["X-CSRF-Token"] = csrfToken;
+  }
+
   const res = await fetch(url, {
     method,
-    headers: data ? { "Content-Type": "application/json" } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
@@ -39,7 +50,7 @@ export async function apiRequest(
     try {
       const errorData = await res.json();
       if (errorData.invalidSession) {
-        localStorage.removeItem("kdrama-journal-user");
+        clearStoredAuth();
         window.location.href = "/";
         return res;
       }

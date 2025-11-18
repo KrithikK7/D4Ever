@@ -24,7 +24,12 @@ interface SectionSidebarProps {
 
 export function SectionSidebar({ chapterId, currentSectionId, isOpen, onToggle }: SectionSidebarProps) {
   const [, setLocation] = useLocation();
-  const { isAdmin, user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canCreateSections = hasPermission("canCreateSections");
+  const canEditSectionsAll = hasPermission("canEditSections");
+  const canEditOwnSections = hasPermission("canEditOwnSections");
+  const canDeleteSectionsAll = hasPermission("canDeleteSections");
+  const canDeleteOwnSections = hasPermission("canDeleteOwnSections");
   const { toast } = useToast();
   const [creatingSection, setCreatingSection] = useState(false);
   const [newSectionTitle, setNewSectionTitle] = useState("");
@@ -44,9 +49,12 @@ export function SectionSidebar({ chapterId, currentSectionId, isOpen, onToggle }
   // Get all liked sections for the user
   const { data: likedSections = [] } = useQuery<Section[]>({
     queryKey: [`/api/users/${user?.id}/liked-sections`],
-    queryFn: () => user?.id 
-      ? fetch(`/api/users/${user.id}/liked-sections`).then(r => r.json()) 
-      : Promise.resolve([]),
+    queryFn: () =>
+      user?.id
+        ? fetch(`/api/users/${user.id}/liked-sections`, {
+            credentials: "include",
+          }).then(r => r.json())
+        : Promise.resolve([]),
     enabled: !!user?.id,
   });
 
@@ -345,7 +353,7 @@ export function SectionSidebar({ chapterId, currentSectionId, isOpen, onToggle }
         </div>
 
         {/* New Section Button (Admin Only) */}
-        {isAdmin && (
+        {canCreateSections && (
           <div className="p-4 border-b">
             <Button
               variant="default"
@@ -367,84 +375,90 @@ export function SectionSidebar({ chapterId, currentSectionId, isOpen, onToggle }
           <div className={cn(isOpen ? "px-4" : "px-2")}>
             {isOpen ? (
               <div className="space-y-2">
-                {sections.map((section, index) => (
-                  <div
-                    key={section.id}
-                    className={cn(
-                      "w-full text-left p-3 rounded-lg transition-colors group",
-                      "hover:bg-kdrama-sakura/20 dark:hover:bg-accent",
-                      currentSectionId === section.id
-                        ? "bg-kdrama-sakura/30 dark:bg-accent text-kdrama-ink dark:text-accent-foreground font-semibold"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <div className="flex items-start gap-3">
-                      <button
-                        onClick={() => handleSectionClick(section.id)}
-                        className="flex items-start gap-3 flex-1 min-w-0"
-                        data-testid={`button-section-${index + 1}`}
-                      >
-                        <span className="flex-shrink-0 w-6 h-6 rounded-full bg-kdrama-sakura/50 dark:bg-accent flex items-center justify-center text-xs font-bold">
-                          {index + 1}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-noto text-sm truncate">{section.title}</p>
+                {sections.map((section, index) => {
+                  const ownsSection = section.createdBy && user?.id === section.createdBy;
+                  const allowEdit = canEditSectionsAll || (canEditOwnSections && ownsSection);
+                  const allowDelete = canDeleteSectionsAll || (canDeleteOwnSections && ownsSection);
+                  return (
+                    <div
+                      key={section.id}
+                      className={cn(
+                        "w-full text-left p-3 rounded-lg transition-colors group",
+                        "hover:bg-kdrama-sakura/20 dark:hover:bg-accent",
+                        currentSectionId === section.id
+                          ? "bg-kdrama-sakura/30 dark:bg-accent text-kdrama-ink dark:text-accent-foreground font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <div className="flex items-start gap-3">
+                        <button
+                          onClick={() => handleSectionClick(section.id)}
+                          className="flex items-start gap-3 flex-1 min-w-0"
+                          data-testid={`button-section-${index + 1}`}
+                        >
+                          <span className="flex-shrink-0 w-6 h-6 rounded-full bg-kdrama-sakura/50 dark:bg-accent flex items-center justify-center text-xs font-bold">
+                            {index + 1}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-noto text-sm truncate">{section.title}</p>
+                          </div>
+                        </button>
+                        <div className="flex items-center gap-1">
+                          {user && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => handleToggleLike(section.id, e)}
+                              className={`h-6 w-6 transition-all ${
+                                likedSectionIds.has(section.id)
+                                  ? "text-red-500 hover:text-red-600 opacity-100"
+                                  : "text-red-400 hover:text-red-500 opacity-100"
+                              }`}
+                              disabled={likeSectionMutation.isPending || unlikeSectionMutation.isPending}
+                              data-testid={`button-like-section-${section.id}`}
+                            >
+                              <Heart
+                                className={`w-3 h-3 transition-all stroke-current ${
+                                  likedSectionIds.has(section.id) ? "fill-current" : "fill-transparent"
+                                }`}
+                              />
+                            </Button>
+                          )}
+                          {allowEdit && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleStartEdit(section);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6"
+                                data-testid={`button-edit-section-${section.id}`}
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </Button>
+                              {allowDelete && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeletingSectionId(section.id);
+                                  }}
+                                  className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6"
+                                  data-testid={`button-delete-section-${section.id}`}
+                                >
+                                  <Trash2 className="w-4 h-4 text-destructive" />
+                                </Button>
+                              )}
+                            </>
+                          )}
                         </div>
-                      </button>
-                      <div className="flex items-center gap-1">
-                        {/* Like Button - Visible to all logged in users */}
-                        {user && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => handleToggleLike(section.id, e)}
-                            className={`h-6 w-6 transition-all ${
-                              likedSectionIds.has(section.id)
-                                ? "text-red-500 hover:text-red-600 opacity-100"
-                                : "text-red-400 hover:text-red-500 opacity-100"
-                            }`}
-                            disabled={likeSectionMutation.isPending || unlikeSectionMutation.isPending}
-                            data-testid={`button-like-section-${section.id}`}
-                          >
-                            <Heart 
-                              className={`w-3 h-3 transition-all stroke-current ${
-                                likedSectionIds.has(section.id) ? "fill-current" : "fill-transparent"
-                              }`} 
-                            />
-                          </Button>
-                        )}
-                        {isAdmin && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleStartEdit(section);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6"
-                              data-testid={`button-edit-section-${section.id}`}
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeletingSectionId(section.id);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6"
-                              data-testid={`button-delete-section-${section.id}`}
-                            >
-                              <Trash2 className="w-4 h-4 text-destructive" />
-                            </Button>
-                          </>
-                        )}
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="space-y-2">

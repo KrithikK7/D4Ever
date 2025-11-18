@@ -46,6 +46,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { useCallback, useEffect, useState, useMemo } from 'react';
+import { CSRF_STORAGE_KEY } from "@/lib/authStorage";
 
 interface TiptapEditorProps {
   value: string;
@@ -241,9 +242,17 @@ export function TiptapEditor({ value, onChange, placeholder, className, singleLi
       formData.append('image', file);
 
       try {
+        const csrfToken = localStorage.getItem(CSRF_STORAGE_KEY);
+        const headers: HeadersInit = {};
+        if (csrfToken) {
+          headers["X-CSRF-Token"] = csrfToken;
+        }
+
         const response = await fetch('/api/upload/image', {
           method: 'POST',
           body: formData,
+          credentials: 'include',
+          headers,
         });
 
         if (!response.ok) throw new Error('Upload failed');

@@ -56,14 +56,25 @@ This will install all required packages for both the frontend and backend.
 
 ### 3. Set Up Environment Variables
 
-Create a `.env` file in the root directory (if not already present) and add your database connection string:
+Copy the provided `.env.example` to `.env` and fill in the values for your environment:
 
-```env
-DATABASE_URL=postgresql://user:password@host:port/database
+```bash
+cp .env.example .env
 ```
 
-**For Replit Users:**
-If you're running this on Replit, the database is automatically provisioned and the `DATABASE_URL` environment variable is already set. You can skip this step.
+| Variable | Description |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string (required for all environments). |
+| `SESSION_SECRET` | Long, random string used to sign session cookies. **Must be set in production** or the server will refuse to start. |
+| `PORT` | Port the Express server listens on (defaults to `5000`). |
+| `NODE_ENV` | Set to `production` when building/running the production bundle. |
+| `SEED_ADMIN_USERNAME` | Username used when running the seed script to create the initial admin account. |
+| `SEED_ADMIN_PASSWORD` | Strong password (min 12 chars, mixed case + numbers) used for the admin account during seeding. |
+| `SEED_READER_USERNAME` | Username for the initial reader account created by the seed script. |
+| `SEED_READER_PASSWORD` | Strong password (min 12 chars, mixed case + numbers) for the reader account during seeding. |
+
+**For Replit Users:** the `DATABASE_URL` is automatically provisioned, but local `.env` setup is still recommended for clarity.
+> ⚠️ Keep `.env`, `cookies.txt`, and other secret material out of version control. They are git-ignored by default—store secrets only in your deployment environment or a secrets manager.
 
 ### 4. Initialize the Database
 
@@ -77,18 +88,18 @@ This command uses Drizzle Kit to create all necessary tables in your database.
 
 ### 5. Seed Sample Data
 
-Populate the database with sample K-Drama journal entries:
+Populate the database with sample K-Drama journal entries. Define the `SEED_*` environment variables shown above before you run the script so the bootstrap accounts use unique, non-default credentials.
 
 ```bash
 npx tsx server/seed.ts
 ```
 
-This will create:
-- 2 user accounts (admin and reader)
-- 5 chapters covering different seasons
-- 7 sections with various moods and themes
-- Multiple pages with embedded images
-- Beautiful K-Drama inspired content
+This will:
+- Create 2 user accounts (admin + reader) using the values you provided in `SEED_*`
+- Add 5 chapters covering different seasons
+- Seed 7 sections with various moods and themes
+- Populate multiple pages with embedded images and soundtrack links
+- Preload analytics + reading progress data so the dashboards have meaningful stats
 
 ### 6. Start the Development Server
 
@@ -98,19 +109,11 @@ npm run dev
 
 The application will start on `http://localhost:5000` (or your Replit URL if using Replit).
 
-## Default Login Credentials
+## Seeded Accounts & Security
 
-After seeding the database, you can log in with these accounts:
-
-### Admin Account
-- **Username:** `admin`
-- **Password:** `admin123`
-- **Capabilities:** Full access to content management, analytics, and admin tools
-
-### Reader Account
-- **Username:** `reader`
-- **Password:** `reader123`
-- **Capabilities:** Read access to all content with progress tracking
+- The seeding script **never** ships with hard-coded credentials. Instead, it reads the usernames and passwords you provide in `SEED_*` variables and refuses to run unless the passwords are long and complex.
+- Treat the seeded accounts as development helpers. For production, either skip the seeding step or rotate the seeded passwords immediately after provisioning.
+- If the repo ever contained a `.env` or cookie jar in git history, rotate any secrets they may have held before deploying.
 
 ## Project Structure
 
@@ -156,6 +159,14 @@ kdrama-journal/
 ### Production
 - `npm run build` - Build the application for production
 - `npm start` - Start the production server
+
+## Production Deployment
+
+1. **Configure environment** – set `NODE_ENV=production`, point `DATABASE_URL` at your production database, and generate a strong `SESSION_SECRET` (recommend at least 32 random bytes). The server enforces this requirement when `NODE_ENV` is `production`.
+2. **Build assets** – run `npm run build` to compile the client (Vite) and bundle the server with esbuild. Start the server with `npm start`.
+3. **Run behind HTTPS** – terminate TLS at your load balancer or reverse proxy so that the session cookie’s `secure` flag can keep it on encrypted channels only. If you’re behind a proxy (e.g., Nginx, Heroku), the server already enables `app.set("trust proxy", 1)` so cookies and rate limiters use the correct client IP.
+4. **Tune rate limits** – the defaults in `server/security.ts` are intentionally conservative (600 requests/minute overall, 20 login attempts per 15 minutes). Monitor real traffic and adjust these numbers as needed for your audience.
+5. **Monitor CSRF tokens** – authenticated clients receive a CSRF token from `/api/auth/login` and `/api/auth/validate`. If you need to refresh one mid-session (for example after a tab wakes from sleep), call `GET /api/auth/csrf` to retrieve a fresh token and store it client-side.
 
 ## Database Schema
 

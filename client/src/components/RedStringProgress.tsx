@@ -189,9 +189,9 @@ export function RedStringProgress({
             </linearGradient>
 
             <linearGradient id="outline-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#ffcccc" stopOpacity="0.08" />
-              <stop offset="50%" stopColor="#ffb3b3" stopOpacity="0.08" />
-              <stop offset="100%" stopColor="#ff9999" stopOpacity="0.08" />
+              <stop offset="0%" stopColor="#6f6f6fff" stopOpacity="0.03" />
+              <stop offset="50%" stopColor="#6f6f6fff" stopOpacity="0.03" />
+              <stop offset="100%" stopColor="#6f6f6fff" stopOpacity="0.03" />
             </linearGradient>
           </defs>
 

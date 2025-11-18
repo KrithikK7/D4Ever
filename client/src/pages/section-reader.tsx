@@ -14,6 +14,7 @@ import { ChevronLeft, ChevronRight, Pencil, Save, X, ArrowUp, ArrowDown, Plus, T
 import { useAuth } from "@/contexts/AuthContext";
 import { useMusicPlayer } from "@/contexts/MusicPlayerContext";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { sanitizeClientHtml } from "@/lib/sanitize";
 import { useToast } from "@/hooks/use-toast";
 import { SectionSidebar } from "@/components/SectionSidebar";
 import { RedStringProgress } from "@/components/RedStringProgress";
@@ -21,14 +22,19 @@ import { PhotoSwipeGallery } from "@/components/PhotoSwipeGallery";
 import { TiptapEditor } from "@/components/TiptapEditor";
 import { InstagramEmbed } from "@/components/InstagramEmbed";
 import InstagramGallery from "@/components/InstagramGallery";
-import { MediaToolbar, ImageEmbedDialog, InstagramEmbedDialog, SpotifyEmbedDialog } from "@/components/admin/MediaEmbedDialogs";
+import { MediaToolbar, ImageEmbedDialog, InstagramEmbedDialog, SpotifyEmbedDialog, AudioEmbedDialog } from "@/components/admin/MediaEmbedDialogs";
+import AudioAttachment from "@/components/AudioAttachment";
 import type { Section, Page, ReadingProgress, Chapter } from "@shared/schema";
 import { useAutoplayConsent } from "@/contexts/AutoplayConsentContext";
 
 export default function SectionReader() {
   const { sectionId } = useParams();
   const [, setLocation] = useLocation();
-  const { user, isAdmin } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canEditSectionsAll = hasPermission("canEditSections");
+  const canEditOwnSections = hasPermission("canEditOwnSections");
+  const canDeleteSectionsAll = hasPermission("canDeleteSections");
+  const canDeleteOwnSections = hasPermission("canDeleteOwnSections");
   const { setCurrentSong } = useMusicPlayer();
   const { autoplayEnabled } = useAutoplayConsent();
   const lastSongRef = useRef<string | null>(null);
@@ -40,6 +46,7 @@ export default function SectionReader() {
   const [creatingPage, setCreatingPage] = useState(false);
   const [deletingPageId, setDeletingPageId] = useState<string | null>(null);
   const [isImageDialogOpen, setIsImageDialogOpen] = useState(false);
+  const [isAudioDialogOpen, setIsAudioDialogOpen] = useState(false);
   const [isInstagramDialogOpen, setIsInstagramDialogOpen] = useState(false);
   const [isSpotifyDialogOpen, setIsSpotifyDialogOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -71,7 +78,12 @@ export default function SectionReader() {
   // Fetch saved reading progress for this section
   const { data: savedProgress } = useQuery<ReadingProgress | null>({
     queryKey: [`/api/sections/${sectionId}/progress`, user?.id],
-    queryFn: () => user?.id ? fetch(`/api/sections/${sectionId}/progress?userId=${user.id}`).then(r => r.json()) : null,
+    queryFn: () =>
+      user?.id
+        ? fetch(`/api/sections/${sectionId}/progress?userId=${user.id}`, {
+            credentials: "include",
+          }).then(r => r.json())
+        : null,
     enabled: !!user?.id && !!sectionId,
   });
 
@@ -103,16 +115,22 @@ export default function SectionReader() {
   // Check if user has liked this section
   const { data: likeStatus } = useQuery<{ isLiked: boolean }>({
     queryKey: [`/api/sections/${sectionId}/like-status`, user?.id],
-    queryFn: () => user?.id 
-      ? fetch(`/api/sections/${sectionId}/like-status?userId=${user.id}`).then(r => r.json()) 
-      : Promise.resolve({ isLiked: false }),
+    queryFn: () =>
+      user?.id
+        ? fetch(`/api/sections/${sectionId}/like-status?userId=${user.id}`, {
+            credentials: "include",
+          }).then(r => r.json())
+        : Promise.resolve({ isLiked: false }),
     enabled: !!user?.id && !!sectionId,
   });
 
   // Get like count for the section
   const { data: likeCount } = useQuery<{ count: number }>({
     queryKey: [`/api/sections/${sectionId}/like-count`],
-    queryFn: () => fetch(`/api/sections/${sectionId}/like-count`).then(r => r.json()),
+    queryFn: () =>
+      fetch(`/api/sections/${sectionId}/like-count`, {
+        credentials: "include",
+      }).then(r => r.json()),
     enabled: !!sectionId,
   });
 
@@ -397,6 +415,12 @@ export default function SectionReader() {
   };
 
   const currentPage = pages[currentPageIndex];
+  const ownsSection = Boolean(section && user?.id && section.createdBy === user.id);
+  const ownsCurrentPage = Boolean(currentPage && user?.id && currentPage.createdBy === user.id);
+  const canEditThisSection = canEditSectionsAll || (canEditOwnSections && ownsSection);
+  const canEditThisPage = canEditSectionsAll || (canEditOwnSections && (ownsSection || ownsCurrentPage));
+  const canDeleteThisSection = canDeleteSectionsAll || (canDeleteOwnSections && ownsSection);
+  const canDeleteThisPage = canDeleteSectionsAll || (canDeleteOwnSections && (ownsSection || ownsCurrentPage));
   const totalPages = pages.length;
 
   // Determine section navigation
@@ -686,20 +710,27 @@ export default function SectionReader() {
   };
 
   const insertMediaContent = (html: string) => {
-    // Append the media content to the end of the current content
-    setEditedContent(editedContent + "\n\n" + html);
+    setEditedContent((prev) => (prev ? `${prev}\n\n${html}` : html));
   };
 
   const renderContent = (content: string) => {
+    const renderSanitizedBlock = (html: string, key: string) => {
+      const sanitized = sanitizeClientHtml(html);
+      if (!sanitized.trim()) {
+        return null;
+      }
+      return <div key={key} dangerouslySetInnerHTML={{ __html: sanitized }} />;
+    };
     const embedRegex = /\[embed:([^\]]+)\]/g;
     const galleryRegex = /\[gallery:([^\]]+)\]/g;
     const videoRegex = /\[video:([^\]]+)\]/g;
     const instagramGalleryRegex = /\[instagram-gallery:([^\]]+)\]/g;
+    const audioRegex = /\[audio:([^\]]+)\]/g;
     const parts: React.ReactNode[] = [];
     let lastIndex = 0;
     
     // Combine all matches from all patterns
-    const allMatches: Array<{ index: number; type: 'embed' | 'gallery' | 'video' | 'instagram-gallery'; data: string }> = [];
+    const allMatches: Array<{ index: number; type: 'embed' | 'gallery' | 'video' | 'instagram-gallery' | 'audio'; data: string }> = [];
     
     let match;
     while ((match = embedRegex.exec(content)) !== null) {
@@ -714,6 +745,9 @@ export default function SectionReader() {
     while ((match = instagramGalleryRegex.exec(content)) !== null) {
       allMatches.push({ index: match.index, type: 'instagram-gallery', data: match[1] });
     }
+    while ((match = audioRegex.exec(content)) !== null) {
+      allMatches.push({ index: match.index, type: 'audio', data: match[1] });
+    }
     
     // Sort by index
     allMatches.sort((a, b) => a.index - b.index);
@@ -722,13 +756,9 @@ export default function SectionReader() {
       // Add HTML content before this match
       if (item.index > lastIndex) {
         const htmlContent = content.substring(lastIndex, item.index);
-        if (htmlContent.trim()) {
-          parts.push(
-            <div 
-              key={`html-${idx}-${lastIndex}`}
-              dangerouslySetInnerHTML={{ __html: htmlContent }}
-            />
-          );
+        const sanitizedBlock = renderSanitizedBlock(htmlContent, `html-${idx}-${lastIndex}`);
+        if (sanitizedBlock) {
+          parts.push(sanitizedBlock);
         }
       }
       
@@ -763,6 +793,18 @@ export default function SectionReader() {
           <InstagramGallery key={`instagram-gallery-${idx}`} urls={instagramUrls} />
         );
         lastIndex = item.index + `[instagram-gallery:${item.data}]`.length;
+      } else if (item.type === 'audio') {
+        const [audioUrl = "", audioTitle = ""] = item.data.split("|").map((segment) => segment.trim());
+        if (audioUrl) {
+          parts.push(
+            <AudioAttachment
+              key={`audio-${idx}`}
+              src={audioUrl}
+              title={audioTitle || undefined}
+            />
+          );
+        }
+        lastIndex = item.index + `[audio:${item.data}]`.length;
       } else {
         // Single embed: [embed:url]
         const embedUrl = item.data;
@@ -786,19 +828,15 @@ export default function SectionReader() {
     // Add remaining HTML content
     if (lastIndex < content.length) {
       const htmlContent = content.substring(lastIndex);
-      if (htmlContent.trim()) {
-        parts.push(
-          <div 
-            key={`html-final`}
-            dangerouslySetInnerHTML={{ __html: htmlContent }}
-          />
-        );
+      const sanitizedBlock = renderSanitizedBlock(htmlContent, `html-final`);
+      if (sanitizedBlock) {
+        parts.push(sanitizedBlock);
       }
     }
 
     // If no special tokens found and we have content, render as HTML
     if (parts.length === 0 && content.trim()) {
-      return <div dangerouslySetInnerHTML={{ __html: content }} />;
+      return renderSanitizedBlock(content, "html-only");
     }
 
     return parts;
@@ -944,7 +982,7 @@ export default function SectionReader() {
                   </Button>
                 )}
 
-                {isAdmin && section && (
+                {canEditThisSection && section && (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -1018,7 +1056,7 @@ export default function SectionReader() {
                           #{tag}
                         </Badge>
                       ))}
-                      {isAdmin && (
+                      {canEditThisSection && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -1050,15 +1088,15 @@ export default function SectionReader() {
           </div>
 
         <Card className="relative p-8 md:p-12 bg-white/80 backdrop-blur-sm border-0 shadow-md">
-          {(formattedPublishedDate || isAdmin) && (
+          {(formattedPublishedDate || canEditThisSection) && (
             <div className="absolute top-6 right-6 flex flex-wrap items-center justify-end gap-2">
               {formattedPublishedDate ? (
-                <span className="inline-flex items-center rounded-full bg-kdrama-ink/10 text-kdrama-ink px-3 py-1 text-xs font-medium uppercase tracking-wide font-noto shadow-sm">
+                <span className="inline-flex items-center rounded-full bg-kdrama-thread/20 text-white px-3 py-1 text-xs font-medium uppercase tracking-wide font-noto shadow-sm">
                   {formattedPublishedDate}
                 </span>
               ) : (
-                isAdmin && (
-                  <span className="inline-flex items-center rounded-full border border-dashed border-muted-foreground/60 px-3 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground font-noto">
+                canEditThisSection && (
+                  <span className="inline-flex items-center rounded-full border border-dashed border-kdrama-thread/60 px-3 py-1 text-xs font-medium uppercase tracking-wide text-white font-noto bg-kdrama-thread/20">
                     Set published date
                   </span>
                 )
@@ -1068,7 +1106,7 @@ export default function SectionReader() {
                   Manual
                 </Badge>
               )}
-              {isAdmin && (
+              {canEditThisSection && (
                 <Popover open={isPublishedDatePopoverOpen} onOpenChange={handlePublishedDatePopoverChange}>
                   <PopoverTrigger asChild>
                     <Button
@@ -1112,7 +1150,7 @@ export default function SectionReader() {
               )}
             </div>
           )}
-          {isAdmin && currentPage && (
+          {canEditThisSection && currentPage && (
             <div className="flex items-center justify-between gap-4 mb-6 pb-4 border-b">
               <div className="flex items-center gap-2">
                 <Button
@@ -1191,9 +1229,9 @@ export default function SectionReader() {
                 <p className="text-muted-foreground mb-4">
                   This section has no content yet.
                 </p>
-                {isAdmin && (
+                {canEditThisPage && (
                   <p className="text-sm text-muted-foreground">
-                    As an admin, you can add pages to this section from the admin console.
+                    You have permission to add pages to this section from the admin console.
                   </p>
                 )}
               </div>
@@ -1203,6 +1241,7 @@ export default function SectionReader() {
                   <MediaToolbar
                     onInsertImage={() => setIsImageDialogOpen(true)}
                     onInsertInstagram={() => setIsInstagramDialogOpen(true)}
+                    onInsertAudio={() => setIsAudioDialogOpen(true)}
                     onInsertSpotify={() => setIsSpotifyDialogOpen(true)}
                   />
                   <div data-testid="editor-edit-content">
@@ -1243,7 +1282,7 @@ export default function SectionReader() {
                 Page {currentPageIndex + 1} of {totalPages}
               </div>
               
-              {isAdmin && currentPage && totalPages > 1 && (
+              {canDeleteThisPage && currentPage && totalPages > 1 && (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -1348,6 +1387,11 @@ export default function SectionReader() {
       <InstagramEmbedDialog
         open={isInstagramDialogOpen}
         onOpenChange={setIsInstagramDialogOpen}
+        onInsert={insertMediaContent}
+      />
+      <AudioEmbedDialog
+        open={isAudioDialogOpen}
+        onOpenChange={setIsAudioDialogOpen}
         onInsert={insertMediaContent}
       />
       <SpotifyEmbedDialog

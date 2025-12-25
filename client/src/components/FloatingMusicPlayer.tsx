@@ -99,7 +99,7 @@ const isPromise = (value: unknown): value is Promise<unknown> =>
 export function FloatingMusicPlayer() {
   const { currentSongUrl, currentSongName, forceReloadKey, setCurrentSong, registerPauseListener } =
     useMusicPlayer();
-  const { autoplayEnabled, setAutoplayEnabled } = useAutoplayConsent();
+  const { autoplayEnabled } = useAutoplayConsent();
 
   const [isMinimized, setIsMinimized] = useState(false);
   const [spotifyApiLoaded, setSpotifyApiLoaded] = useState(false);
@@ -389,10 +389,6 @@ export function FloatingMusicPlayer() {
     return unregister;
   }, [executePlaybackCommand, registerPauseListener]);
 
-  const handleEnableAutoplay = () => {
-    setAutoplayEnabled(true);
-  };
-
   if (!spotifyUri) {
     return null;
   }
@@ -440,19 +436,6 @@ export function FloatingMusicPlayer() {
             {!isControllerReady && (
               <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
                 Loading Spotify player…
-              </div>
-            )}
-
-            {!autoplayEnabled && isControllerReady && (
-              <div className="absolute inset-0 z-10 flex flex-col bg-background/90 backdrop-blur-md px-4 py-3 text-center shadow-inner rounded-b-xl">
-                <p className="font-noto text-sm text-muted-foreground mb-3">
-                  Music is muted. Tap to bring it to life.
-                </p>
-                <div className="mt-auto w-full flex justify-end">
-                  <Button onClick={handleEnableAutoplay} size="sm" data-testid="button-enable-music-overlay">
-                    Unmute
-                  </Button>
-                </div>
               </div>
             )}
 

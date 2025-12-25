@@ -8,6 +8,7 @@ import { requireAuth, SESSION_COOKIE_NAME, requirePermission, type UserPrivilege
 import { sanitizeRichText } from "./sanitize";
 import { ensureCsrfToken, csrfProtection, loginRateLimiter } from "./security";
 import { persistUpload } from "./uploads";
+import { assertPasswordMeetsPolicy, assertPasswordRotation, PasswordPolicyError } from "./password-policy";
 import { z } from "zod";
 
 const upload = multer({
@@ -40,13 +41,50 @@ const privilegesSchema = z.object({
 
 const createUserRequestSchema = z.object({
   username: z.string().min(3),
-  password: z.string().min(6),
+  password: z.string().min(1),
   role: z.enum(["admin", "reader"]),
 }).merge(privilegesSchema);
 
 const updateUserRequestSchema = privilegesSchema.extend({
-  password: z.string().min(6).optional(),
+  password: z.string().min(1).optional(),
   role: z.enum(["admin", "reader"]).optional(),
+});
+
+const loginRequestSchema = z.object({
+  username: z.string().min(1),
+  password: z.string().min(1),
+});
+
+const updateChapterSchema = insertChapterSchema.partial().strict();
+
+const updatePageSchema = insertPageSchema
+  .pick({
+    content: true,
+    pageNumber: true,
+  })
+  .partial()
+  .strict();
+
+const reorderSectionsSchema = z.object({
+  sectionOrders: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        order: z.number().int(),
+      }),
+    )
+    .min(1),
+});
+
+const reorderChaptersSchema = z.object({
+  chapterOrders: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        order: z.number().int(),
+      }),
+    )
+    .min(1),
 });
 
 const getUserPrivileges = (user: User): UserPrivileges => ({
@@ -148,20 +186,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Authentication routes
   app.post("/api/auth/login", loginRateLimiter, async (req, res) => {
     try {
-      const { username, password } = req.body;
-      
-      if (!username || !password) {
-        return res.status(400).json({ error: "Username and password required" });
-      }
+      const { username, password } = loginRequestSchema.parse(req.body);
 
       const user = await storage.getUserByUsername(username);
-      
       if (!user) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
 
       const passwordMatch = await bcrypt.compare(password, user.password);
-      
       if (!passwordMatch) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
@@ -198,6 +230,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       console.error("Login error:", error);
+      if (error instanceof Error && error.name === "ZodError") {
+        res.status(400).json({ error: "Username and password required" });
+        return;
+      }
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -272,6 +308,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ error: "Username already exists" });
       }
 
+      assertPasswordMeetsPolicy(data.password, data.username);
       const hashedPassword = await bcrypt.hash(data.password, 10);
       const user = await storage.createUser({
         username: data.username,
@@ -286,6 +323,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(toUserResponse(user));
     } catch (error) {
       console.error("Create user error:", error);
+      if (error instanceof PasswordPolicyError) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
+      if (error instanceof Error && error.name === "ZodError") {
+        res.status(400).json({ error: "Invalid user payload" });
+        return;
+      }
       res.status(400).json({ error: "Failed to create user" });
     }
   });
@@ -293,12 +338,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/users/:id", requireAdmin, csrfProtection, async (req, res) => {
     try {
       const payload = updateUserRequestSchema.parse(req.body);
+      const existingUser = await storage.getUser(req.params.id);
+      if (!existingUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
       const updateData: Partial<InsertUser> = {};
 
       if (payload.role) {
         updateData.role = payload.role;
       }
       if (payload.password) {
+        assertPasswordMeetsPolicy(payload.password, existingUser.username);
+        await assertPasswordRotation(payload.password, existingUser.password);
         updateData.password = await bcrypt.hash(payload.password, 10);
       }
 
@@ -335,6 +386,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(toUserResponse(updated));
     } catch (error) {
       console.error("Update user error:", error);
+      if (error instanceof PasswordPolicyError) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
+      if (error instanceof Error && error.name === "ZodError") {
+        res.status(400).json({ error: "Invalid update payload" });
+        return;
+      }
       res.status(400).json({ error: "Failed to update user" });
     }
   });
@@ -376,13 +435,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/chapters/:id", requireAdmin, csrfProtection, async (req, res) => {
     try {
-      const chapter = await storage.updateChapter(req.params.id, req.body);
+      const validatedPatch = updateChapterSchema.parse(req.body);
+      if (Object.keys(validatedPatch).length === 0) {
+        return res.status(400).json({ error: "No updates provided" });
+      }
+      const chapter = await storage.updateChapter(req.params.id, validatedPatch);
       if (!chapter) {
         return res.status(404).json({ error: "Chapter not found" });
       }
       res.json(chapter);
     } catch (error) {
       console.error("Update chapter error:", error);
+      if (error instanceof Error && error.name === "ZodError") {
+        res.status(400).json({ error: "Invalid chapter payload" });
+        return;
+      }
       res.status(500).json({ error: "Failed to update chapter" });
     }
   });
@@ -394,6 +461,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Delete chapter error:", error);
       res.status(500).json({ error: "Failed to delete chapter" });
+    }
+  });
+
+  app.patch("/api/chapters/reorder", requireAdmin, csrfProtection, async (req, res) => {
+    try {
+      const { chapterOrders } = reorderChaptersSchema.parse(req.body);
+
+      if (chapterOrders.length === 0) {
+        return res.status(400).json({ error: "chapterOrders must contain chapters" });
+      }
+
+      const uniqueOrders = new Set(chapterOrders.map((c) => c.order));
+      if (uniqueOrders.size !== chapterOrders.length) {
+        return res.status(400).json({ error: "Order values must be unique" });
+      }
+
+      await storage.reorderChapters(chapterOrders);
+      res.status(200).json({ success: true });
+    } catch (error) {
+      console.error("Reorder chapters error:", error);
+      if (error instanceof Error && error.name === "ZodError") {
+        res.status(400).json({ error: "Invalid reorder payload" });
+      } else {
+        res.status(500).json({ error: "Failed to reorder chapters" });
+      }
     }
   });
 
@@ -480,10 +572,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/sections/reorder", requireAuthenticated, csrfProtection, async (req, res) => {
     try {
       const authUser = req.authUser!;
-      const { sectionOrders } = req.body;
-      if (!Array.isArray(sectionOrders) || sectionOrders.length === 0) {
-        return res.status(400).json({ error: "sectionOrders must be a non-empty array" });
-      }
+      const { sectionOrders } = reorderSectionsSchema.parse(req.body);
 
       // Validate that all sections belong to the same chapter
       const sectionIds = sectionOrders.map(so => so.id);
@@ -523,6 +612,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(200).json({ success: true });
     } catch (error) {
       console.error("Reorder sections error:", error);
+      if (error instanceof Error && error.name === "ZodError") {
+        res.status(400).json({ error: "Invalid reorder payload" });
+        return;
+      }
       res.status(500).json({ error: "Failed to reorder sections" });
     }
   });
@@ -663,18 +756,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!canEditPageResource(authUser, existingPage, parentSection)) {
         return res.status(403).json({ error: "Forbidden" });
       }
-      const updatePayload: Partial<InsertPage> = { ...req.body };
-      if (typeof updatePayload.content === "string") {
-        updatePayload.content = sanitizeRichText(updatePayload.content);
+      const validatedPatch = updatePageSchema.parse(req.body);
+      if (Object.prototype.hasOwnProperty.call(validatedPatch, "content") && typeof validatedPatch.content === "string") {
+        validatedPatch.content = sanitizeRichText(validatedPatch.content);
       }
 
-      const page = await storage.updatePage(req.params.id, updatePayload);
+      const page = await storage.updatePage(req.params.id, validatedPatch);
       if (!page) {
         return res.status(404).json({ error: "Page not found" });
       }
       res.json(page);
     } catch (error) {
       console.error("Update page error:", error);
+      if (error instanceof Error && error.name === "ZodError") {
+        res.status(400).json({ error: "Invalid page payload" });
+        return;
+      }
       res.status(500).json({ error: "Failed to update page" });
     }
   });

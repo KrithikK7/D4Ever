@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useRef, useCallback } from "react";
-import { USER_STORAGE_KEY, CSRF_STORAGE_KEY, clearStoredAuth } from "@/lib/authStorage";
+import { clearClientAuthState, getClientCsrfToken, setClientCsrfToken } from "@/lib/securityState";
 
 export type UserRole = "admin" | "reader";
 
@@ -64,14 +64,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    const storedToken = localStorage.getItem(CSRF_STORAGE_KEY);
     if (inactivityTimerRef.current) {
       clearTimeout(inactivityTimerRef.current);
       inactivityTimerRef.current = null;
     }
     setUser(null);
     setCsrfToken(null);
-    clearStoredAuth();
+    const storedToken = getClientCsrfToken();
+    clearClientAuthState();
     const headers: Record<string, string> = {};
     if (storedToken) {
       headers["X-CSRF-Token"] = storedToken;
@@ -96,10 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const mappedUser = mapUserFromResponse(data.user);
           setUser(mappedUser);
           setCsrfToken(data.csrfToken || null);
-          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(mappedUser));
-          if (data.csrfToken) {
-            localStorage.setItem(CSRF_STORAGE_KEY, data.csrfToken);
-          }
+          setClientCsrfToken(data.csrfToken ?? null);
         } else {
           logout();
         }
@@ -172,10 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const mappedUser = mapUserFromResponse(authResponse.user);
         setUser(mappedUser);
         setCsrfToken(authResponse.csrfToken || null);
-        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(mappedUser));
-        if (authResponse.csrfToken) {
-          localStorage.setItem(CSRF_STORAGE_KEY, authResponse.csrfToken);
-        }
+        setClientCsrfToken(authResponse.csrfToken ?? null);
         return true;
       }
       return false;

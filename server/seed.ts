@@ -1,6 +1,7 @@
 import './bootstrap-env';
 import bcrypt from "bcrypt";
 import { storage } from "./storage";
+import { assertPasswordMeetsPolicy } from "./password-policy";
 
 async function seed() {
   try {
@@ -30,11 +31,13 @@ async function seed() {
 
     requireStrongPassword("SEED_ADMIN_PASSWORD", adminPassword);
     requireStrongPassword("SEED_READER_PASSWORD", readerPassword);
+    assertPasswordMeetsPolicy(adminPassword, adminUsername);
+    assertPasswordMeetsPolicy(readerPassword, readerUsername);
 
     // Create admin user
-    const existingAdmin = await storage.getUserByUsername(adminUsername);
-    if (!existingAdmin) {
-      const adminUser = await storage.createUser({
+    let adminUser = await storage.getUserByUsername(adminUsername);
+    if (!adminUser) {
+      adminUser = await storage.createUser({
         username: adminUsername,
         password: await bcrypt.hash(adminPassword, 10),
         role: "admin",
@@ -45,9 +48,9 @@ async function seed() {
     }
 
     // Create reader user for testing
-    const existingReader = await storage.getUserByUsername(readerUsername);
-    if (!existingReader) {
-      const readerUser = await storage.createUser({
+    let readerUser = await storage.getUserByUsername(readerUsername);
+    if (!readerUser) {
+      readerUser = await storage.createUser({
         username: readerUsername,
         password: await bcrypt.hash(readerPassword, 10),
         role: "reader",
@@ -55,6 +58,10 @@ async function seed() {
       console.log("Created reader user:", readerUser.username);
     } else {
       console.log("Reader user already exists, skipping creation");
+    }
+
+    if (!adminUser || !readerUser) {
+      throw new Error("Failed to initialize seed users");
     }
 
     // Create Chapter 1: Spring Destiny

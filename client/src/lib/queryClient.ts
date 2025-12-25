@@ -1,5 +1,5 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
-import { CSRF_STORAGE_KEY, USER_STORAGE_KEY, clearStoredAuth } from "./authStorage";
+import { clearClientAuthState, getClientCsrfToken, ensureCsrfTokenFromServer } from "./securityState";
 
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
@@ -8,7 +8,7 @@ async function throwIfResNotOk(res: Response) {
       
       // Check if this is an invalid session error
       if (errorData.invalidSession) {
-        clearStoredAuth();
+        clearClientAuthState();
         // Redirect to login page
         window.location.href = "/";
       }
@@ -22,6 +22,8 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
+const SAFE_HTTP_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
 export async function apiRequest(
   method: string,
   url: string,
@@ -32,9 +34,12 @@ export async function apiRequest(
     headers["Content-Type"] = "application/json";
   }
 
-  const csrfToken = localStorage.getItem(CSRF_STORAGE_KEY);
-  const safeMethod = ["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
-  if (csrfToken && !safeMethod) {
+  let csrfToken: string | null = null;
+  if (!SAFE_HTTP_METHODS.has(method.toUpperCase())) {
+    csrfToken = getClientCsrfToken() || (await ensureCsrfTokenFromServer());
+  }
+
+  if (csrfToken) {
     headers["X-CSRF-Token"] = csrfToken;
   }
 
@@ -50,7 +55,7 @@ export async function apiRequest(
     try {
       const errorData = await res.json();
       if (errorData.invalidSession) {
-        clearStoredAuth();
+        clearClientAuthState();
         window.location.href = "/";
         return res;
       }

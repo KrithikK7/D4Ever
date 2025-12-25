@@ -4,6 +4,7 @@ import * as React from "react"
 import * as RechartsPrimitive from "recharts"
 
 import { cn } from "@/lib/utils"
+import { getCspNonce } from "@/lib/cspNonce"
 
 // Format: { THEME_NAME: CSS_SELECTOR }
 const THEMES = { light: "", dark: ".dark" } as const
@@ -71,6 +72,7 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
   const colorConfig = Object.entries(config).filter(
     ([, config]) => config.theme || config.color
   )
+  const nonce = React.useMemo(() => getCspNonce(), [])
 
   if (!colorConfig.length) {
     return null
@@ -78,6 +80,7 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
 
   return (
     <style
+      nonce={nonce ?? undefined}
       dangerouslySetInnerHTML={{
         __html: Object.entries(THEMES)
           .map(

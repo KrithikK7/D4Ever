@@ -1,6 +1,8 @@
 import './bootstrap-env';
-import express, { type Request, Response, NextFunction } from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import helmet from "helmet";
+import crypto from "crypto";
+import { type IncomingMessage, type ServerResponse } from "http";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { ensureSchemaColumns } from "./ensure-schema";
@@ -18,7 +20,26 @@ declare module 'http' {
     rawBody: unknown
   }
 }
+
+declare global {
+  namespace Express {
+    interface Locals {
+      cspNonce?: string;
+    }
+  }
+}
+
 const isProduction = app.get("env") === "production";
+
+const nonceDirective = (_req: IncomingMessage, res: ServerResponse): string => {
+  const expressRes = res as Response;
+  return `'nonce-${expressRes.locals.cspNonce ?? ""}'`;
+};
+
+app.use((_, res, next) => {
+  res.locals.cspNonce = crypto.randomBytes(16).toString("base64");
+  next();
+});
 
 app.use(helmet({
   contentSecurityPolicy: isProduction
@@ -26,8 +47,24 @@ app.use(helmet({
         useDefaults: true,
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "https://www.youtube.com", "https://player.vimeo.com"],
-          styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+          scriptSrc: [
+            "'self'",
+            nonceDirective,
+            "https://www.youtube.com",
+            "https://player.vimeo.com",
+          ],
+          scriptSrcAttr: ["'none'"],
+          styleSrc: [
+            "'self'",
+            nonceDirective,
+            "https://fonts.googleapis.com",
+          ],
+          styleSrcElem: [
+            "'self'",
+            nonceDirective,
+            "https://fonts.googleapis.com",
+          ],
+          styleSrcAttr: ["'unsafe-inline'"],
           imgSrc: ["'self'", "data:", "blob:", "https://images.unsplash.com"],
           mediaSrc: ["'self'", "data:", "blob:", "https://*.scdn.co", "https://*.spotifycdn.com", "https://open.spotify.com"],
           fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],

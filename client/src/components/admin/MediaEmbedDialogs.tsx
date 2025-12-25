@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { CSRF_STORAGE_KEY } from "@/lib/authStorage";
+import { ensureCsrfTokenFromServer, getClientCsrfToken } from "@/lib/securityState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -164,7 +164,10 @@ export function ImageEmbedDialog({ open, onOpenChange, onInsert }: ImageEmbedDia
     formData.append('image', file);
     
     try {
-      const csrfToken = localStorage.getItem(CSRF_STORAGE_KEY);
+      let csrfToken = getClientCsrfToken();
+      if (!csrfToken) {
+        csrfToken = await ensureCsrfTokenFromServer();
+      }
       const headers: HeadersInit = {};
       if (csrfToken) {
         headers["X-CSRF-Token"] = csrfToken;
@@ -538,7 +541,10 @@ export function AudioEmbedDialog({ open, onOpenChange, onInsert }: AudioEmbedDia
       const formData = new FormData();
       formData.append("audio", selectedFile);
 
-      const csrfToken = localStorage.getItem(CSRF_STORAGE_KEY);
+      let csrfToken = getClientCsrfToken();
+      if (!csrfToken) {
+        csrfToken = await ensureCsrfTokenFromServer();
+      }
       const headers: HeadersInit = {};
       if (csrfToken) {
         headers["X-CSRF-Token"] = csrfToken;

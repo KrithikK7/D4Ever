@@ -776,6 +776,10 @@
     color: hsl(var(--muted-foreground));
   }
 
+  .rendered-content .instagram-embed-container {
+    padding-top: 1.5rem;
+  }
+
   .rendered-content pre {
     background: hsl(var(--muted));
     padding: 1rem;

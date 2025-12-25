@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 
 interface AutoplayConsentContextValue {
   autoplayEnabled: boolean;
@@ -8,20 +8,7 @@ interface AutoplayConsentContextValue {
 const AutoplayConsentContext = createContext<AutoplayConsentContextValue | undefined>(undefined);
 
 export function AutoplayConsentProvider({ children }: { children: ReactNode }) {
-  const [autoplayEnabled, setAutoplayEnabledState] = useState<boolean>(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-    return window.localStorage.getItem("autoplayEnabled") === "true";
-  });
-
-  useEffect(() => {
-    if (autoplayEnabled) {
-      window.localStorage.setItem("autoplayEnabled", "true");
-    } else {
-      window.localStorage.removeItem("autoplayEnabled");
-    }
-  }, [autoplayEnabled]);
+  const [autoplayEnabled, setAutoplayEnabledState] = useState<boolean>(true);
 
   const setAutoplayEnabled = (enabled: boolean) => {
     setAutoplayEnabledState(enabled);

@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Upload, X, Image as ImageIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { CSRF_STORAGE_KEY } from "@/lib/authStorage";
+import { ensureCsrfTokenFromServer, getClientCsrfToken } from "@/lib/securityState";
 
 interface ImageUploadFieldProps {
   label: string;
@@ -54,7 +54,10 @@ export function ImageUploadField({
       const formData = new FormData();
       formData.append('image', file);
       
-      const csrfToken = localStorage.getItem(CSRF_STORAGE_KEY);
+      let csrfToken = getClientCsrfToken();
+      if (!csrfToken) {
+        csrfToken = await ensureCsrfTokenFromServer();
+      }
       const headers: HeadersInit = {};
       if (csrfToken) {
         headers["X-CSRF-Token"] = csrfToken;

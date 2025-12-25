@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import path from "path";
 import { promises as fs } from "fs";
 import { randomUUID } from "crypto";
@@ -113,7 +113,7 @@ export function createUploadsRouter() {
     }),
   );
 
-  router.use((err: NodeJS.ErrnoException, _req, res, next) => {
+  router.use((err: NodeJS.ErrnoException & { statusCode?: number }, _req: Request, res: Response, next: NextFunction) => {
     if (err && (err.code === "ENOENT" || err.statusCode === 404)) {
       return res.status(404).json({ error: "File not found" });
     }

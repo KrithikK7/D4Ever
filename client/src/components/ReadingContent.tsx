@@ -75,7 +75,7 @@ export function ReadingContent({
         </div>
 
         {publishedDate && (
-          <div className="flex items-center gap-4 text-sm text-muted-foreground font-noto">
+          <div className="flex items-center gap-4 text-sm text-muted-foreground font-noto mb-10">
             <div className="flex items-center gap-1">
               <CalendarIcon className="w-4 h-4" />
               <span>{publishedDateFormatter.format(publishedDate)}</span>
@@ -88,7 +88,7 @@ export function ReadingContent({
         )}
       </div>
 
-      <Card className="p-8 md:p-12 bg-white/80 dark:bg-card/80 backdrop-blur-sm border-0 shadow-md">
+      <Card className="mt-6 p-8 md:p-12 bg-white/80 dark:bg-card/80 backdrop-blur-sm border-0 shadow-md">
         <div className="prose prose-lg max-w-none font-noto">
           {paragraphs.map((paragraph, index) => (
             <div key={index} className="relative">

@@ -311,7 +311,7 @@ export function SectionSidebar({ chapterId, currentSectionId, isOpen, onToggle }
         className={cn(
           "fixed top-0 left-0 h-full bg-white dark:bg-card shadow-xl z-50 transition-all duration-300",
           "flex flex-col",
-          isOpen ? "w-80" : "w-16"
+          isOpen ? "w-96" : "w-20"
         )}
       >
         {/* Header */}
@@ -372,7 +372,7 @@ export function SectionSidebar({ chapterId, currentSectionId, isOpen, onToggle }
 
         {/* Sections List */}
         <ScrollArea className="flex-1 py-4 overflow-visible">
-          <div className={cn(isOpen ? "px-4" : "px-2")}>
+          <div className={cn(isOpen ? "px-5" : "px-3")}>
             {isOpen ? (
               <div className="space-y-2">
                 {sections.map((section, index) => {

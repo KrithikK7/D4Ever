@@ -23,7 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Plus, Edit, Trash2, Book } from "lucide-react";
+import { Plus, Edit, Trash2, Book, ArrowUp, ArrowDown } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Chapter } from "@shared/schema";
@@ -123,6 +123,46 @@ export function ChapterManagement() {
     },
   });
 
+  const reorderMutation = useMutation({
+    mutationFn: async (chapterOrders: { id: string; order: number }[]) => {
+      return apiRequest("PATCH", "/api/chapters/reorder", { chapterOrders });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/chapters"] });
+      toast({
+        title: "Chapter order updated",
+        description: "Chapter positions have been saved.",
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to reorder chapters. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleMoveChapter = (chapterId: string, direction: "up" | "down") => {
+    if (chapters.length < 2) return;
+    const sorted = [...chapters].sort((a, b) => a.order - b.order);
+    const currentIndex = sorted.findIndex((chapter) => chapter.id === chapterId);
+    if (currentIndex === -1) return;
+
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= sorted.length) {
+      return;
+    }
+
+    const [movedChapter] = sorted.splice(currentIndex, 1);
+    sorted.splice(targetIndex, 0, movedChapter);
+    const payload = sorted.map((chapter, index) => ({
+      id: chapter.id,
+      order: index + 1,
+    }));
+    reorderMutation.mutate(payload);
+  };
+
   const resetForm = () => {
     setFormData({ title: "", description: "", coverImage: "", songUrl: "", order: "0" });
   };
@@ -196,7 +236,7 @@ export function ChapterManagement() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {chapters.map((chapter) => (
+        {chapters.map((chapter, index) => (
           <Card key={chapter.id} data-testid={`card-chapter-${chapter.id}`}>
             {chapter.coverImage ? (
               <div className="h-32 w-full overflow-hidden rounded-t-lg">
@@ -213,12 +253,36 @@ export function ChapterManagement() {
             )}
             <CardHeader>
               <div className="flex items-start justify-between gap-2">
-                <CardTitle className="font-myeongjo text-lg">
-                  {chapter.title}
-                </CardTitle>
-                <Badge variant="outline" className="font-noto shrink-0">
-                  #{chapter.order}
-                </Badge>
+                <div>
+                  <CardTitle className="font-myeongjo text-lg">
+                    {chapter.title}
+                  </CardTitle>
+                  <Badge variant="outline" className="font-noto mt-1 inline-flex">
+                    #{chapter.order}
+                  </Badge>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={index === 0 || reorderMutation.isPending}
+                    className="h-6 w-6"
+                    onClick={() => handleMoveChapter(chapter.id, "up")}
+                    data-testid={`button-move-chapter-up-${chapter.id}`}
+                  >
+                    <ArrowUp className="w-3 h-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={index === chapters.length - 1 || reorderMutation.isPending}
+                    className="h-6 w-6"
+                    onClick={() => handleMoveChapter(chapter.id, "down")}
+                    data-testid={`button-move-chapter-down-${chapter.id}`}
+                  >
+                    <ArrowDown className="w-3 h-3" />
+                  </Button>
+                </div>
               </div>
               {chapter.description && (
                 <CardDescription className="font-noto line-clamp-2">

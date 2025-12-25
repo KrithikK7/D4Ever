@@ -1087,7 +1087,7 @@ export default function SectionReader() {
             )}
           </div>
 
-        <Card className="relative p-8 md:p-12 bg-white/80 backdrop-blur-sm border-0 shadow-md">
+        <Card className="relative p-8 pt-16 md:p-12 md:pt-20 bg-white/80 backdrop-blur-sm border-0 shadow-md">
           {(formattedPublishedDate || canEditThisSection) && (
             <div className="absolute top-6 right-6 flex flex-wrap items-center justify-end gap-2">
               {formattedPublishedDate ? (

@@ -72,7 +72,6 @@ cp .env.example .env
 | `SEED_ADMIN_PASSWORD` | Strong password (min 12 chars, mixed case + numbers) used for the admin account during seeding. |
 | `SEED_READER_USERNAME` | Username for the initial reader account created by the seed script. |
 | `SEED_READER_PASSWORD` | Strong password (min 12 chars, mixed case + numbers) for the reader account during seeding. |
-
 **For Replit Users:** the `DATABASE_URL` is automatically provisioned, but local `.env` setup is still recommended for clarity.
 > ⚠️ Keep `.env`, `cookies.txt`, and other secret material out of version control. They are git-ignored by default—store secrets only in your deployment environment or a secrets manager.
 
@@ -114,6 +113,7 @@ The application will start on `http://localhost:5000` (or your Replit URL if usi
 - The seeding script **never** ships with hard-coded credentials. Instead, it reads the usernames and passwords you provide in `SEED_*` variables and refuses to run unless the passwords are long and complex.
 - Treat the seeded accounts as development helpers. For production, either skip the seeding step or rotate the seeded passwords immediately after provisioning.
 - If the repo ever contained a `.env` or cookie jar in git history, rotate any secrets they may have held before deploying.
+- Runtime user management enforces the same policy: minimum 12 characters with upper-, lower-case, numeric, and special characters, rejection of common/breached passwords, and a check to ensure the new password differs from the previous one.
 
 ## Project Structure
 

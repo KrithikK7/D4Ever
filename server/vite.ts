@@ -58,6 +58,8 @@ export async function setupVite(app: Express, server: Server) {
         `src="/src/main.tsx"`,
         `src="/src/main.tsx?v=${nanoid()}"`,
       );
+      const nonce = res.locals.cspNonce ?? "";
+      template = template.replace(/%CSP_NONCE%/g, nonce);
       const page = await vite.transformIndexHtml(url, template);
       res.status(200).set({ "Content-Type": "text/html" }).end(page);
     } catch (e) {
@@ -76,10 +78,23 @@ export function serveStatic(app: Express) {
     );
   }
 
-  app.use(express.static(distPath));
+  const indexPath = path.resolve(distPath, "index.html");
+  if (!fs.existsSync(indexPath)) {
+    throw new Error("Missing client index.html in build output");
+  }
+  const indexTemplate = fs.readFileSync(indexPath, "utf-8");
 
-  // fall through to index.html if the file doesn't exist
-  app.use("*", (_req, res) => {
-    res.sendFile(path.resolve(distPath, "index.html"));
+  app.use(
+    express.static(distPath, {
+      index: false,
+    }),
+  );
+
+  app.get("*", (_req, res) => {
+    const nonce = res.locals.cspNonce ?? "";
+    const html = indexTemplate.replace(/%CSP_NONCE%/g, nonce);
+    res.setHeader("Content-Type", "text/html");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(html);
   });
 }
